@@ -6,28 +6,62 @@ import networkx as nx
 from sklearn.metrics import mean_absolute_error
 import pandas as pd
 
-def generate_coordinates(n, bounds, type):
+import numpy as np
+
+import numpy as np
+
+def generate_coordinates(n, bounds, type, hex_size=1):
     """
-    Generate random 2D spatial coordinates.
+    Generate random or structured 2D spatial coordinates.
     :param n: Number of points
     :param bounds: Tuple specifying the (min, max) bounds for the coordinates
+    :param type: Type of grid - "regular", "normal", or "hexagonal"
+    :param hex_size: Size of the hexagons (only used if type is "hexagonal")
     :return: 2D array of coordinates
     """
-    assert type in ["regular", "normal"]
-    if type == "normal":
-        return np.random.uniform(bounds[0] + np.finfo(float).eps, bounds[1] - np.finfo(float).eps, size=(n, 2))
-    elif type == "regular": 
-        grid_size = int(np.ceil(np.sqrt(n)))
+    assert type in ["regular", "normal", "hexagonal"], "type must be 'regular', 'normal', or 'hexagonal'"
 
-        # add/subtract small positive constant so that the behavior of border=0 is as expected
+    if type == "normal":
+        # Randomly generate points with a uniform distribution within bounds
+        return np.random.uniform(bounds[0] + np.finfo(float).eps, bounds[1] - np.finfo(float).eps, size=(n, 2))
+
+    elif type == "regular":
+        # Generate a regular grid
+        grid_size = int(np.ceil(np.sqrt(n)))
         x = np.linspace(bounds[0] + 1e-5, bounds[1] - 1e-5, grid_size)
         y = np.linspace(bounds[0] + 1e-5, bounds[1] - 1e-5, grid_size)
         xx, yy = np.meshgrid(x, y)
         grid_coords = np.vstack([xx.ravel(), yy.ravel()]).T
         return grid_coords[:n]
+    
+    elif type == "hexagonal":
+        # Generate a hexagonal grid
+        coords = []
+        dx = hex_size * 3/2  # horizontal distance between hexagons
+        dy = hex_size * np.sqrt(3)  # vertical distance between hexagons
+        cols = int(np.ceil((bounds[1] - bounds[0]) / dx))
+        rows = int(np.ceil((bounds[1] - bounds[0]) / dy))
+
+        for row in range(rows):
+            for col in range(cols):
+                x = bounds[0] + col * dx
+                y = bounds[0] + row * dy
+
+                # Offset every other row by half the horizontal distance (to stagger them)
+                if col % 2 == 1:
+                    y += dy / 2
+
+                # Ensure the coordinates are within bounds
+                if bounds[0] <= x <= bounds[1] and bounds[0] <= y <= bounds[1]:
+                    coords.append([x, y])
+
+                if len(coords) >= n:
+                    return np.array(coords)
+
+        return np.array(coords[:n])
+
     else:
         return None
-
 
 def create_anndata(coordinates, n_neighs, bounds):
     """
@@ -83,20 +117,36 @@ def compute_centrality_measures(adata):
     degree_centrality = nx.degree_centrality(graph)
     closeness_centrality = nx.closeness_centrality(graph)
     betweenness_centrality = nx.betweenness_centrality(graph)
+    harmonic_centrality = nx.harmonic_centrality(graph)
     
-    adata.obs['degree'] = normalize_dict(degree_centrality)
-    adata.obs['closeness'] = normalize_dict(closeness_centrality)
-    adata.obs['betweenness'] = normalize_dict(betweenness_centrality)
+    adata.obs['degree'] = normalize_dict(degree_centrality) #list(degree_centrality.values()) 
+    adata.obs['closeness'] = normalize_dict(closeness_centrality) #list(closeness_centrality.values())
+    adata.obs['betweenness'] = normalize_dict(betweenness_centrality) #list(betweenness_centrality.values())
+    adata.obs['harmonic'] = normalize_dict(harmonic_centrality) 
     return
     
 
 def compute_node_errors_and_distances(adata_original, adata_truncated, bounds):    
     original_coords = adata_original.obsm['spatial']
-    adata_truncated.obs["distance_to_border"] = adata_original.obs['distance_to_border'][np.array(adata_truncated.obs_names).astype(int)]
+    adata_truncated.obs["distance_to_border"] = adata_original.obs['distance_to_border'][adata_truncated.obs_names]
 
-    for measure in ["degree", "closeness", "betweenness"]:
-        adata_truncated.obs[f"{measure} error"] = adata_original.obs[measure].iloc[np.array(adata_truncated.obs_names).astype(int)] - adata_truncated.obs[measure]
+    for measure in ["degree", "closeness", "betweenness", "harmonic"]:
+        adata_truncated.obs[f"{measure} error"] = adata_original.obs[measure][adata_truncated.obs_names] - adata_truncated.obs[measure]
     return 
+
+
+def draw_edges(spatial_connectivities, coords, color, alpha, label):
+    graph = nx.Graph(spatial_connectivities)
+    labelled = False
+    for i, (x, y) in enumerate(coords):
+        neighbors = graph.neighbors(i)
+        for neighbor in neighbors:
+            x_neigh, y_neigh = coords[neighbor]
+            if not labelled:
+                plt.plot([x, x_neigh], [y, y_neigh], color=color, lw=0.5, alpha=alpha, zorder=-1, label=label)
+                labelled = True
+            else:
+                plt.plot([x, x_neigh], [y, y_neigh], color=color, lw=0.5, alpha=alpha, zorder=-1)
 
 
 def plot_graphs_with_errors(adata_original, adata_truncated, border, measure, bounds):
@@ -113,27 +163,34 @@ def plot_graphs_with_errors(adata_original, adata_truncated, border, measure, bo
     # Extract original and truncated coordinates
     original_coords = adata_original.obsm['spatial']
     truncated_coords = adata_truncated.obsm['spatial']
-
+    
     original_sizes = adata_original.obs[measure].values * 100  # Scale sizes for visibility
     truncated_sizes = adata_truncated.obs[measure].values * 100  # Scale sizes
 
     error_colors = adata_truncated.obs[f'{measure} error'].values 
     
     plt.figure(figsize=(10, 8))
-    plt.scatter(original_coords[:, 0], original_coords[:, 1], s=original_sizes, c='grey', alpha=0.6, label='Original Graph', edgecolors='k')
-    scatter = plt.scatter(truncated_coords[:, 0], truncated_coords[:, 1], s=truncated_sizes, c=error_colors, cmap='YlOrRd', alpha=0.8, label='Truncated Graph', edgecolors='none')
+    draw_edges(spatial_connectivities=adata_original.obsp['spatial_connectivities'], coords=original_coords, color="grey", alpha=1, label="Original edges")
+    draw_edges(spatial_connectivities=adata_truncated.obsp['spatial_connectivities'], coords=truncated_coords, color="black", alpha=0.7, label="Trunacted edges")
+    
+    plt.scatter(original_coords[:, 0], original_coords[:, 1], 
+                s=original_sizes, c='grey', label=f'Original graph, size indicates {measure} centrality', 
+                edgecolors='none', zorder=1)
+    
+    scatter = plt.scatter(truncated_coords[:, 0], truncated_coords[:, 1], 
+                          s=truncated_sizes, c=error_colors, 
+                          cmap='YlOrRd', 
+                          label=f'Truncated graph, size indicates {measure} centrality, color indicates error', edgecolors='none', zorder=1)
 
     cbar = plt.colorbar(scatter)
     cbar.set_label('Error')
-    
-    # Draw rectangles for borders
-    plt.gca().add_patch(plt.Rectangle((bounds[0] + border, bounds[0] + border), bounds[1] - 2 * border, bounds[1] - 2 * border, linewidth=2, edgecolor='none', facecolor='none', label='Borders'))
+
+
+    plt.gca().add_patch(plt.Rectangle((bounds[0] + border, bounds[0] + border), bounds[1] - 2 * border, bounds[1] - 2 * border, linewidth=2, edgecolor='red', facecolor='none', label='Borders'))
 
     # Set axis limits and labels
     plt.xlabel('X Coordinate')
     plt.ylabel('Y Coordinate')
     plt.title(f'Original and Truncated Graphs with {measure.capitalize()} Centrality and Error')
-    plt.legend()
-    plt.grid(True)
-    
-    plt.show()
+    plt.legend(loc='lower center', bbox_to_anchor=(0.5, 1.05))
+    plt.tight_layout()
