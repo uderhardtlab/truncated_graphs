@@ -5,10 +5,31 @@ import matplotlib.pyplot as plt
 import networkx as nx
 from sklearn.metrics import mean_absolute_error
 import pandas as pd
+from scipy import stats
+from scipy.spatial import distance
 
-import numpy as np
 
-import numpy as np
+def fully_process(adata_original, bounds, borders):
+    compute_centrality_measures(adata_original)
+    
+    error_dfs = dict()
+    adatas_truncated = dict()
+    centralities_truncated = dict()
+    
+    for border in borders:
+        adatas_truncated[border] = filter_border_nodes(adata_original, border=border, bounds=bounds)
+        compute_centrality_measures(adatas_truncated[border])
+        compute_node_distances(adata_original, 
+                                          adata_truncated=adatas_truncated[border])
+        compute_errors(adata_original=adata_original, 
+                                          adata_truncated=adatas_truncated[border])
+    
+        compute_pearson_correlation(adata_original=adata_original, adata_truncated=adatas_truncated[border])
+        compute_kendalls_tau(adata_original=adata_original, adata_truncated=adatas_truncated[border])
+        compute_cosine_similarity(adata_original=adata_original, adata_truncated=adatas_truncated[border])
+
+    return adata_original, adatas_truncated
+    
 
 def generate_coordinates(n, bounds, type, hex_size=1):
     """
@@ -126,13 +147,59 @@ def compute_centrality_measures(adata):
     return
     
 
-def compute_node_errors_and_distances(adata_original, adata_truncated, bounds):    
+def compute_node_distances(adata_original, adata_truncated):    
     original_coords = adata_original.obsm['spatial']
     adata_truncated.obs["distance_to_border"] = adata_original.obs['distance_to_border'][adata_truncated.obs_names]
 
-    for measure in ["degree", "closeness", "betweenness", "harmonic"]:
+
+def compute_errors(adata_original, adata_truncated, measure=None):    
+    if measure:
+        measures = [measure]
+    else:
+        measures = ["degree", "closeness", "betweenness", "harmonic"]
+    
+    for measure in measures:
         adata_truncated.obs[f"{measure} error"] = adata_original.obs[measure][adata_truncated.obs_names] - adata_truncated.obs[measure]
-    return 
+
+
+def compute_pearson_correlation(adata_original, adata_truncated, measure=None):    
+    if measure:
+        measures = [measure]
+    else:
+        measures = ["degree", "closeness", "betweenness", "harmonic"]
+    
+    for measure in measures:
+            adata_truncated.uns[f"{measure} pearson correlation"] = stats.pearsonr(adata_original.obs[measure][adata_truncated.obs_names], adata_truncated.obs[measure]).statistic
+
+
+def compute_kendalls_tau(adata_original, adata_truncated, measure=None):
+    if measure:
+        measures = [measure]
+    else:
+        measures = ["degree", "closeness", "betweenness", "harmonic"]
+    
+    for measure in measures:
+            adata_truncated.uns[f"{measure} kendall's tau"] = stats.kendalltau(adata_original.obs[measure][adata_truncated.obs_names], adata_truncated.obs[measure]).statistic
+
+
+def compute_jaccard_similarity(adata_original, adata_truncated, measure=None):
+    if measure:
+        measures = [measure]
+    else:
+        measures = ["degree", "closeness", "betweenness", "harmonic"]
+    
+    for measure in measures:
+            adata_truncated.uns[f"{measure} jaccard distance"] = distance.jaccard(adata_original.obs[measure][adata_truncated.obs_names], adata_truncated.obs[measure])
+
+
+def compute_cosine_similarity(adata_original, adata_truncated, measure=None):
+    if measure:
+        measures = [measure]
+    else:
+        measures = ["degree", "closeness", "betweenness", "harmonic"]
+    
+    for measure in measures:
+            adata_truncated.uns[f"{measure} cosine distance"] = distance.cosine(adata_original.obs[measure][adata_truncated.obs_names], adata_truncated.obs[measure])
 
 
 def draw_edges(spatial_connectivities, coords, color, alpha, label):
