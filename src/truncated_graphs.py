@@ -84,6 +84,16 @@ def generate_coordinates(n, bounds, type, hex_size=1):
     else:
         return None
 
+
+def calculate_distance_to_border(adata, bounds):
+    coordinates = adata.obsm["spatial"]
+    distances_to_border = np.minimum(
+        np.minimum(coordinates[:, 0], bounds[1] - coordinates[:, 0]),
+        np.minimum(coordinates[:, 1], bounds[1] - coordinates[:, 1])
+    )
+    adata.obs["distance_to_border"] = distances_to_border
+
+
 def create_anndata(coordinates, n_neighs, bounds):
     """
     Create AnnData object and compute spatial neighbors.
@@ -94,12 +104,7 @@ def create_anndata(coordinates, n_neighs, bounds):
     adata = ad.AnnData(X=np.zeros((coordinates.shape[0], 1)))  # Empty X matrix
     adata.obsm['spatial'] = coordinates
 
-    distances_to_border = np.minimum(
-        np.minimum(coordinates[:, 0], bounds[1] - coordinates[:, 0]),
-        np.minimum(coordinates[:, 1], bounds[1] - coordinates[:, 1])
-    )
-
-    adata.obs["distance_to_border"] = distances_to_border
+    calculate_distance_to_border(adata, bounds)
 
     sorted_adata = adata[np.argsort(distances_to_border)].copy()
     sorted_adata.obs_names = np.array(range(len(adata))).astype(str)
