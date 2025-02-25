@@ -9,6 +9,23 @@ from scipy import stats
 from scipy.spatial import distance
 
 
+def get_mibitof(path):    
+    real_data = sq.datasets.mibitof(path=path)
+    bounds = (0, np.max(real_data.obsm["spatial"][:, 0]))
+
+    real_data.obsp["spatial_connectivities"] = real_data.obsp["connectivities"].toarray()
+    del real_data.obsp["connectivities"]
+    del real_data.var
+    del real_data.obsm["X_scanorama"]
+    del real_data.obsm["X_umap"]
+    del real_data.obs
+    del real_data.uns
+    bounds = (0, np.max(real_data.obsm["spatial"][:, 0]))
+    calculate_distance_to_border(real_data, bounds)
+    return real_data, bounds
+
+
+
 def fully_process(adata_original, bounds, borders):
     compute_centrality_measures(adata_original)
     
@@ -105,6 +122,7 @@ def create_anndata(coordinates, n_neighs, bounds):
     adata.obsm['spatial'] = coordinates
 
     calculate_distance_to_border(adata, bounds)
+    distances_to_border = adata.obs["distance_to_border"] 
 
     sorted_adata = adata[np.argsort(distances_to_border)].copy()
     sorted_adata.obs_names = np.array(range(len(adata))).astype(str)

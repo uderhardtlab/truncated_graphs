@@ -9,6 +9,23 @@ from scipy import stats
 from scipy.spatial import distance
 
 
+def get_mibitof(path):    
+    real_data = sq.datasets.mibitof(path=path)
+    bounds = (0, np.max(real_data.obsm["spatial"][:, 0]))
+
+    real_data.obsp["spatial_connectivities"] = real_data.obsp["connectivities"].toarray()
+    del real_data.obsp["connectivities"]
+    del real_data.var
+    del real_data.obsm["X_scanorama"]
+    del real_data.obsm["X_umap"]
+    del real_data.obs
+    del real_data.uns
+    bounds = (0, np.max(real_data.obsm["spatial"][:, 0]))
+    calculate_distance_to_border(real_data, bounds)
+    return real_data, bounds
+
+
+
 def fully_process(adata_original, bounds, borders):
     compute_centrality_measures(adata_original)
     
@@ -84,6 +101,16 @@ def generate_coordinates(n, bounds, type, hex_size=1):
     else:
         return None
 
+
+def calculate_distance_to_border(adata, bounds):
+    coordinates = adata.obsm["spatial"]
+    distances_to_border = np.minimum(
+        np.minimum(coordinates[:, 0], bounds[1] - coordinates[:, 0]),
+        np.minimum(coordinates[:, 1], bounds[1] - coordinates[:, 1])
+    )
+    adata.obs["distance_to_border"] = distances_to_border
+
+
 def create_anndata(coordinates, n_neighs, bounds):
     """
     Create AnnData object and compute spatial neighbors.
@@ -94,12 +121,8 @@ def create_anndata(coordinates, n_neighs, bounds):
     adata = ad.AnnData(X=np.zeros((coordinates.shape[0], 1)))  # Empty X matrix
     adata.obsm['spatial'] = coordinates
 
-    distances_to_border = np.minimum(
-        np.minimum(coordinates[:, 0], bounds[1] - coordinates[:, 0]),
-        np.minimum(coordinates[:, 1], bounds[1] - coordinates[:, 1])
-    )
-
-    adata.obs["distance_to_border"] = distances_to_border
+    calculate_distance_to_border(adata, bounds)
+    distances_to_border = adata.obs["distance_to_border"] 
 
     sorted_adata = adata[np.argsort(distances_to_border)].copy()
     sorted_adata.obs_names = np.array(range(len(adata))).astype(str)
