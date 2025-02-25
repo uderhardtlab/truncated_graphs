@@ -6,6 +6,16 @@ from sklearn.linear_model import LinearRegression
 
 
 def fit_log(d, C):
+    """
+    Fits a logarithmic function to the given data.
+    
+    Parameters:
+    d (array-like): Distance values.
+    C (array-like): Corresponding centrality values.
+    
+    Returns:
+    tuple: Coefficients (a, b) and fitted values.
+    """
     d_nonzero = d[d > 0]
     C_nonzero = C[d > 0]  
     d_transformed = np.log(d_nonzero).reshape(-1, 1)  
@@ -17,33 +27,43 @@ def fit_log(d, C):
 
     
 def fit_piece_wise_linear(d, C, M=1000):
+    """
+    Fits a piecewise linear function to the given data using optimization.
+    
+    Parameters:
+    d (array-like): Distance values.
+    C (array-like): Corresponding centrality values.
+    M (int, optional): Large constant for big-M constraints. Default is 1000.
+    
+    Returns:
+    tuple: Optimized slope (m), intercept (c0), and breakpoint (b).
+    """
     n = len(d) 
     
     model = gp.Model()
     
-    m = model.addVar(vtype=GRB.CONTINUOUS, name="m") # Steigung vor Ellebogen
-    c0 = model.addVar(vtype=GRB.CONTINUOUS, name="c0") # y-Achsenabschnitt C(0)
-    b = model.addVar(vtype=GRB.CONTINUOUS, lb=min(d), ub=max(d), name="b") # Ellebogen
+    m = model.addVar(vtype=GRB.CONTINUOUS, name="m") # Slope before breakpoint
+    c0 = model.addVar(vtype=GRB.CONTINUOUS, name="c0") # y-intercept
+    b = model.addVar(vtype=GRB.CONTINUOUS, lb=min(d), ub=max(d), name="b") # Breakpoint
     
     z = model.addVars(n, vtype=GRB.BINARY, name="z")
-    
     epsilon = model.addVars(n, vtype=GRB.CONTINUOUS, name="epsilon")
     
     model.setObjective(gp.quicksum(epsilon[i] * epsilon[i] for i in range(n)), GRB.MINIMIZE)
-
+    
+    # Setting solver parameters for precision
     model.setParam('OptimalityTol', 1e-4) 
     model.setParam('MIPGap', 0.01)  
     
     for i in range(n):
-        # 1. wenn z[i] = 1 (d_i <= b, links von Ellebogen), dann epsilon_i >= m * d_i + c0 - C_i
+        # Constraints enforcing piecewise linear fit
         model.addConstr(epsilon[i] >= (m * d[i] + c0 - C[i]) - (1 - z[i]) * M)
         model.addConstr(epsilon[i] >= -(m * d[i] + c0 - C[i]) - (1 - z[i]) * M)
     
-        # 2. wenn z[i] = 0 (d_i > b, rechts von Ellebogen), dann epsilon_i >= m * b + c0 - C_i
         model.addConstr(epsilon[i] >= (m * b + c0 - C[i]) - z[i] * M)
         model.addConstr(epsilon[i] >= -(m * b + c0 - C[i]) - z[i] * M)
     
-        # binärer "Switch"
+        # Binary switch for piecewise behavior
         model.addConstr(z[i] * M >= b - d[i])
         model.addConstr((1 - z[i]) * M >= d[i] - b)
     
@@ -52,6 +72,9 @@ def fit_piece_wise_linear(d, C, M=1000):
 
 
 def plot_piece_wise_linear(d, C, m_opt, c0_opt, b_opt, measure, n, t, path):
+    """
+    Plots the original data and optimized piecewise linear fit.
+    """
     d_curve = np.linspace(min(d), max(d), 500)
     C_curve = np.piecewise(
         d_curve,
@@ -69,6 +92,9 @@ def plot_piece_wise_linear(d, C, m_opt, c0_opt, b_opt, measure, n, t, path):
 
 
 def plot_log(d, C, a, b, f, measure, n, t, path=None):
+    """
+    Plots the original data and the logarithmic fit.
+    """
     d_nonzero = d[d > 0]
     C_nonzero = C[d > 0]  
     plt.scatter(d_nonzero, C_nonzero, label="Original")

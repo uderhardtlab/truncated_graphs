@@ -1,2 +1,2 @@
-from truncated_graphs import *
-from fit_piecewise_linear import *
+from src.truncated_graphs import *
+from src.fit import *
