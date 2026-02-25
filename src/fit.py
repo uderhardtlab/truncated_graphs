@@ -88,15 +88,19 @@ def fit_piece_wise_linear(d, C):
     
     # Initial guess: median for breakpoint, slope=1, intercept=mean
     p0 = [np.median(d), 1.0, np.mean(C)]
+        # Set bounds: b > 0, m and c0 can be any value
+    lower_bounds = [0, -np.inf, -np.inf]  # b >= 0
+    upper_bounds = [np.inf, np.inf, np.inf]
     
-    # Fit curve
-    p_opt, _ = curve_fit(piecewise_plateau, d, C, p0=p0)
+    # Fit curve with bounds
+    p_opt, _ = curve_fit(piecewise_plateau, d, C, p0=p0, bounds=(lower_bounds, upper_bounds))
     b_opt, m_opt, c0_opt = p_opt
     
     # Compute fitted values
     C_fit = piecewise_plateau(d, b_opt, m_opt, c0_opt)
     
     return m_opt, c0_opt, b_opt, C_fit
+    
 
 
 
@@ -163,41 +167,5 @@ def fit_piece_wise_linear_old(d, C, M=1000):
     return m.X, c0.X, b.X, C_model
 
 
-def plot_piece_wise_linear(d, C, m_opt, c0_opt, b_opt, measure, graph_type, path=None):
-    """
-    Plots the original data and optimized piecewise linear fit.
-    """
-    d_curve = np.linspace(min(d), max(d), 500)
-    C_curve = np.piecewise(
-        d_curve,
-        [d_curve <= b_opt, d_curve > b_opt],
-        [lambda x: m_opt * x + c0_opt, lambda x: m_opt * b_opt + c0_opt]
-    )
-    
-    plt.scatter(d, C, color="blue", label="Original", alpha=0.5)
-    plt.plot(d_curve, C_curve, color="red", label="Optimized", linewidth=2)
-    plt.xlabel("Distance to border")
-    plt.ylabel(f"{measure.capitalize()} centrality")
-    plt.title(f"Optimized piece-wise linear fit for {graph_type} graph and {measure} centrality")
-    plt.legend()
-    if path:
-        plt.savefig(path)
-
-
-def plot_log(d, C, a, b, f, measure, path=None):
-    """
-    Plots the original data and the logarithmic fit.
-    """   
-    sorted_pairs = sorted(zip(d, f))  # [(1, 8), (2, 7), (3, 9)]
-    xs_sorted, ys_sorted = zip(*sorted_pairs)
-
-    plt.scatter(d, C, label="Original")
-    plt.plot(xs_sorted, ys_sorted, color="red", label=f"Fitted curve: {a:.2f} * log(x) + {b:.2f}")
-    
-    plt.ylabel(f"{measure.capitalize()} centrality")
-    plt.xlabel("Distance to border")
-    plt.legend()
-    if path:
-        plt.savefig(path)
 
 
