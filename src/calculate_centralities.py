@@ -10,8 +10,7 @@ plt.rcParams['svg.fonttype'] = 'none'
 
 from border_effects_kNN_del import delaunay_edges, knn_edges, rnn_edges
 from truncated_graphs import distance_to_border, compute_centrality_measures
-from fit import fit_piece_wise_linear, fit_log
-from evaluate_fit import log_likelihood, relative_likelihood
+
 
 
 def process_dataset_del(dataset):

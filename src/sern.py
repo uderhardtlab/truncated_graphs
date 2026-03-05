@@ -1,150 +1,125 @@
-# Requirements:
-# pip install anndata numpy scipy networkx tqdm
 import numpy as np
-import scipy.sparse as sp
 from scipy.spatial.distance import pdist, squareform
-import networkx as nx
-from tqdm import trange
+from graph_tool.all import Graph
+from graph_tool.centrality import (
+    betweenness,
+    pagerank,
+    closeness,
+)
+from graph_tool.clustering import local_clustering
+import numpy as np
+from joblib import Parallel, delayed
+import numpy as np
+from tqdm import tqdm
+
+def estimate_link_probability(coords, edge_list, n_bins):
+
+    coords = np.asarray(coords, dtype=np.float32)
+    N = len(coords)
+
+    # full matrix (float32)
+    dist_matrix = squareform(pdist(coords)).astype(np.float32)
+
+    upper = dist_matrix[np.triu_indices(N, k=1)]
+    bin_edges = np.linspace(upper.min(), upper.max(), n_bins + 1)
+
+    edge_set = set(tuple(sorted(e)) for e in edge_list)
+
+    A = np.zeros(n_bins, dtype=np.int64)
+    B = np.zeros(n_bins, dtype=np.int64)
+
+    for i in range(N):
+        for j in range(i):
+            d = dist_matrix[i, j]
+            b = np.searchsorted(bin_edges, d, side="right") - 1
+            if b == n_bins:
+                b -= 1
+
+            A[b] += 1
+            if (j, i) in edge_set:
+                B[b] += 1
+
+    p = np.divide(B, A, out=np.zeros_like(B, dtype=np.float32), where=A > 0)
+
+    return p, bin_edges, dist_matrix
 
 
-def nx_from_adata(adata):
-    coords = get_spatial_coords(adata)
-    A = adata.obsp['spatial_connectivities']
-    G = nx_from_coords_and_A(coords, A)
-    return G
+def generate_sern(N, p, bin_edges, dist_matrix, rng):
+    n_bins = len(p)
+    edges = []
+
+    for i in range(N):
+        for j in range(i):
+            d = dist_matrix[i, j]
+            b = np.searchsorted(bin_edges, d, side="right") - 1
+            if b == n_bins:
+                b -= 1
+
+            if rng.random() < p[b]:
+                edges.append((j, i))
+
+    return edges
 
 
-def nx_from_coords_and_A(coords, A):
-    if sp.issparse(A):
-        G = nx.from_scipy_sparse_array(A)
-    else:
-        G = nx.from_numpy_array(A)
-    # add spatial coords as node attributes
-    for i in range(coords.shape[0]):
-        G.nodes[i]['pos'] = coords[i]
-    return G
+def compute_centrality_measures(edge_list, N):
+
+    g = Graph(directed=False)
+    g.add_vertex(N)
+    g.add_edge_list(edge_list)
+
+    results = {}
+
+    # Degree
+    deg = g.get_out_degrees(g.get_vertices())
+    results["degree"] = np.array(deg)
+
+    # PageRank
+    pr = pagerank(g)
+    results["pagerank"] = np.array(pr.a)
+
+    # Betweenness
+    vb, _ = betweenness(g)
+    results["betweenness"] = np.array(vb.a)
+
+    # Closeness
+    cl = closeness(g)
+    results["closeness"] = np.array(cl.a)
+
+    # Harmonic centrality (via closeness parameter)
+    harm = closeness(g, harmonic=True)
+    results["harmonic"] = np.array(harm.a)
+
+    # Clustering
+    lc = local_clustering(g)
+    results["clustering"] = np.array(lc.a)
+
+    return results
 
 
-def get_spatial_coords(adata):
-    if 'spatial' in adata.obsm:
-        coords = np.asarray(adata.obsm['spatial'])
-        return coords
-    else:
-        raise ValueError("AnnData has no adata.obsm['spatial']. Provide node coordinates there.")
+def surrogate_worker(seed, N, p, bin_edges, dist_matrix):
 
-
-def get_distances(adata):
-    if 'distances' in adata.obsp and sp.issparse(adata.obsp['distances']):
-        # If obsp distances exists as sparse full pairwise distances, convert to dense
-        pair_dists = adata.obsp['spatial_distances'].toarray()
-        return pair_dists
-    else:
-        raise ValueError("AnnData has no adata.obsp['distances']. Provide distance matrix there.")
-        
-        
-def get_adjacency(adata):
-    if 'spatial_connectivities' in adata.obsp:
-        A = adata.obsp['spatial_connectivities']
-        if sp.issparse(A):
-            A = (A > 0).astype(int).toarray()
-        else:
-            A = (np.asarray(A) > 0).astype(int)
-        # ensure symmetric and no self-loops
-        A = np.triu(A, k=1)
-        A = A + A.T
-        return A
-    else:           
-        raise ValueError("AnnData has no adata.obsp['spatial_connectivities'].")
-        
-def build_serns_from_anndata(adata, n_surr=500, n_bins=50, distance_metric='euclidean', seed=None, return_p_of_d=False):
-    """
-    Build spatially-embedded random network (SERN) surrogates from an AnnData object.
-    - adata.obsm['spatial'] is used for node coordinates (Nx2 or Nx3).
-    - adata.obsp['spatial_connectivities'] is used as the reference adjacency (sparse matrix).
-    Returns:
-      surrogates: list of numpy boolean adjacency matrices (shape (n_obs,n_obs)) length n_surr
-      p_bins, bin_edges: arrays describing the estimated p(d) if return_p_of_d True
-    """
     rng = np.random.default_rng(seed)
-    
-    # 1) get coordinates
-    coords = get_spatial_coords(adata)
-    n = coords.shape[0]
+    edges = generate_sern(N, p, bin_edges, dist_matrix, rng)
 
-    # 2) get pairwise distances (use provided distances if available to avoid recomputing)
-    pair_dists = get_distances(adata)
-    
-    # 3) get adjacency (binary)
-    A = get_adjacency(adata)
-    
-    # 4) compute empirical p(d) in distance bins:
-    # For each bin, p = (# observed links with distance in bin) / (# possible pairs with distance in bin)
-    d_upper = pair_dists[np.triu_indices(n, k=1)]
-    a_upper = A[np.triu_indices(n, k=1)]
-
-    # create bins
-    bin_counts_total, bin_edges = np.histogram(d_upper, bins=n_bins)
-    # counts of actual edges per bin
-    bin_counts_links, _ = np.histogram(d_upper[a_upper == 1], bins=bin_edges)
-
-    # avoid zero-division: where no pairs fall into a bin, set p to 0
-    with np.errstate(divide='ignore', invalid='ignore'):
-        p_of_bin = np.where(bin_counts_total > 0, bin_counts_links / bin_counts_total, 0.0)
-
-    # 5) precompute each pair's bin index
-    # use upper triangular pairs for sampling
-    # For speed, compute bin index array aligned with i<j pairs
-    pair_bins = np.digitize(d_upper, bin_edges) - 1
-    # clamp to valid bin indices
-    pair_bins = np.clip(pair_bins, 0, len(p_of_bin)-1)
-
-    # 6) generate surrogates
-    surrogates = []
-    rng_integers = rng.integers  # speed alias
-    for _ in trange(n_surr, desc="Generating SERNs"):
-        # sample edges for upper triangular pairs according to p_of_bin
-        probs = p_of_bin[pair_bins]
-        # draw bernoulli for each pair
-        draws = rng.random(len(probs)) < probs
-        # construct adjacency matrix
-        A_surr = np.zeros((n, n), dtype=np.int8)
-        iu = np.triu_indices(n, k=1)
-        A_surr[iu] = draws.astype(np.int8)
-        A_surr = A_surr + A_surr.T
-        surrogates.append(A_surr)
-
-    if return_p_of_d:
-        return surrogates, p_of_bin, bin_edges
-    return surrogates
+    return compute_centrality_measures(edges, N)
 
 
-# Example: compute degree z-scores against the SERN ensemble
-def degree_zscore_from_serns(adata, surrogates):
-    """
-    Compute degree and z-score of degree for each node comparing original adata connectivities to SERN surrogates.
-    Returns:
-      deg_orig: (n,) degrees
-      deg_mean: (n,) mean degree across surrogates
-      deg_std: (n,) std deviation across surrogates
-      z_score: (n,) (deg_orig - deg_mean) / deg_std  (where deg_std==0 -> np.nan)
-    """
-    import numpy as np
-    if 'spatial_connectivities' in adata.obsp:
-        A = adata.obsp['spatial_connectivities']
-        if sp.issparse(A):
-            A = (A > 0).astype(int).toarray()
-        else:
-            A = (np.asarray(A) > 0).astype(int)
-    else:
-        raise ValueError("AnnData has no adata.obsp['spatial_connectivities'].")
+def surrogate_ensemble_gt(coords, edge_list, n_bins,
+                          n_surrogates=200,
+                          n_jobs=2):
 
-    n = A.shape[0]
-    deg_orig = A.sum(axis=1)
+    p, bin_edges, dist_matrix = estimate_link_probability(
+        coords, edge_list, n_bins
+    )
 
-    degs = np.vstack([s.sum(axis=1) for s in surrogates])  # shape (n_surr, n)
-    deg_mean = degs.mean(axis=0)
-    deg_std = degs.std(axis=0, ddof=1)
+    N = len(coords)
+    seeds = np.random.randint(0, 1_000_000, size=n_surrogates)
 
-    z = (deg_orig - deg_mean) / (deg_std + 1e-12)
-    z[deg_std == 0] = np.nan
-    return deg_orig, deg_mean, deg_std, z
+    results = Parallel(n_jobs=n_jobs)(
+        delayed(surrogate_worker)(
+            seed, N, p, bin_edges, dist_matrix
+        )
+        for seed in tqdm(seeds, desc="Generating surrogates")
+    )
+
+    return results

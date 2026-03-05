@@ -5,7 +5,7 @@ import pandas as pd
 import networkx as nx
 
 from itertools import combinations
-from scipy.spatial import Delaunay
+from scipy.spatial import Delaunay, ConvexHull
 from scipy.ndimage import center_of_mass
 
 from sklearn.neighbors import NearestNeighbors
@@ -97,6 +97,25 @@ def delaunay_edges(coords):
     return edges
 
 
+def delaunay_edges_geodesic(coords):
+    """
+    Correct Spherical Delaunay using Convex Hull.
+    coords: (n, 3) array of Cartesian points.
+    """
+    # ConvexHull finds the 'shrink-wrap' around the points
+    hull = ConvexHull(coords)
+    edges = set()
+
+    # hull.simplices are the triangles forming the surface
+    for simplex in hull.simplices:
+        # A simplex in 3D ConvexHull is a triangle (3 indices)
+        # We add the 3 edges of that triangle
+        edges.add(frozenset((simplex[0], simplex[1])))
+        edges.add(frozenset((simplex[1], simplex[2])))
+        edges.add(frozenset((simplex[2], simplex[0])))
+    return edges
+
+
 def knn_edges_on_subset(coords, subset, k):
     """Directed, asymmetric kNN recomputed on truncated domain."""
     subcoords = coords[subset]
@@ -141,6 +160,40 @@ def delaunay_edges_on_subset(coords, subset):
             edges.add(frozenset((subset[u], subset[v])))
 
     return edges
+
+
+def delaunay_edges_on_subset_geodesic(coords, subset):
+    subcoords = coords[subset]
+    
+    try:
+        hull = ConvexHull(subcoords)
+    except Exception as e:
+        print(f"Hull computation failed: {e}")
+        return set()
+
+    edges = set()
+    
+    for simplex in hull.simplices:
+        for u, v in combinations(simplex, 2):
+            global_u = subset[u]
+            global_v = subset[v]
+            edges.add(frozenset((global_u, global_v)))
+
+    return edges
+
+
+def reindex_edges_to_crop(crop_edges, crop):
+    # global → local lookup
+    global_to_local = {g: i for i, g in enumerate(crop)}
+    local_edges = []
+
+    for edge in crop_edges:
+        u, v = tuple(edge)  # unpack frozenset
+        local_u = global_to_local[u]
+        local_v = global_to_local[v]
+        local_edges.append((local_u, local_v))
+
+    return local_edges
 
 
 # ============================================================
@@ -204,6 +257,32 @@ def edge_length_statistics(coords, trunc_edges, full_edges, directed):
         "Symmetry": symmetry if directed else None,
     })
 
+
+def crop_and_dist_cap(coords, radius_geodesic=0.5):
+    # 1. Pick a random node as the center of the cap
+    center_idx = np.random.choice(len(coords))
+    center_point = coords[center_idx]
+    
+    # 2. Calculate Geodesic distance from every point to the center
+    # On a unit sphere, dist = arccos(dot_product)
+    # We clip to [-1, 1] to avoid float errors with arccos
+    dot_products = np.dot(coords, center_point)
+    geodesic_to_center = np.arccos(np.clip(dot_products, -1.0, 1.0))
+    
+    # 3. Define the subset (nodes within the radius)
+    subset_indices = np.where(geodesic_to_center <= radius_geodesic)[0]
+    
+    # 4. Calculate distance to the border
+    # Distance to border = Radius of cap - distance to center
+    dist_to_border = radius_geodesic - geodesic_to_center[subset_indices]
+    
+    dist_series = pd.Series(
+        dist_to_border, 
+        name="distance_to_border", 
+        index=subset_indices
+    )
+    
+    return subset_indices, dist_series
 
 # ============================================================
 # Main API

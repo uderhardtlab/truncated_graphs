@@ -29,22 +29,8 @@ def distance_to_border(coords):
 
     return pd.Series(d_border, name="distance_to_border")
     
-
-def compute_centrality_measures(coords, edges):
-    graph = nx.from_edgelist(edges)
-
-    degree_centrality = nx.degree_centrality(graph)
-    closeness_centrality = nx.closeness_centrality(graph)
-    betweenness_centrality = nx.betweenness_centrality(graph)
-    harmonic_centrality = nx.harmonic_centrality(graph)
-    clustering = nx.clustering(graph)
-    pagerank = nx.pagerank(graph)
-    df = pd.concat([pd.Series(degree_centrality, name="degree"), 
-                    pd.Series(closeness_centrality, name="closeness"),
-                    pd.Series(betweenness_centrality, name="betweenness"), 
-                    pd.Series(harmonic_centrality, name="harmonic"),
-                    pd.Series(clustering, name="clustering"),
-                    pd.Series(pagerank, name="pagerank")
-                   ], axis=1)
-    return df
     
+def distance_to_mask(coords, mask):
+    #TODO
+    pass
+
