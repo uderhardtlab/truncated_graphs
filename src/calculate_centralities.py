@@ -9,15 +9,16 @@ from tqdm import tqdm
 plt.rcParams['svg.fonttype'] = 'none'
 
 from border_effects_kNN_del import delaunay_edges, knn_edges, rnn_edges
-from truncated_graphs import distance_to_border, compute_centrality_measures
-
+from truncated_graphs import distance_to_border
+from sern import compute_centrality_measures
 
 
 def process_dataset_del(dataset):
     coords = datasets[dataset]
     distances = distance_to_border(coords)
     edges = delaunay_edges(coords)
-    df = compute_centrality_measures(coords, edges)
+    df = compute_centrality_measures(edges)
+    df = pd.DataFrame(df)    
     df["dataset"] = dataset
     return pd.concat([distances, df], axis=1)
 
@@ -27,7 +28,8 @@ def process_dataset_knn(dataset, k):
     distances = distance_to_border(coords)
     try:
         edges = knn_edges(coords, k=k)
-        df = compute_centrality_measures(coords, edges)
+        df = compute_centrality_measures(edges)
+        df = pd.DataFrame(df)    
     except Exception:
         df = pd.DataFrame()
     df["dataset"] = dataset
@@ -41,7 +43,8 @@ def process_dataset_rnn(dataset, radius_factor):
     base_radius = np.max(coords) / np.sqrt(len(coords))
     r = radius_factor * base_radius
     edges = rnn_edges(coords, r=r)
-    df = compute_centrality_measures(coords, edges)
+    df = compute_centrality_measures(edges)
+    df = pd.DataFrame(df)
     df["dataset"] = dataset
     df["radius"] = r
     df["radius_factor"] = radius_factor

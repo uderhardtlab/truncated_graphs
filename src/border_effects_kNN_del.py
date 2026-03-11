@@ -62,7 +62,7 @@ def spatial_subset(coords, xlim, ylim):
 
 def knn_edges(coords, k):
     """Directed, asymmetric kNN on full set."""
-    nbrs = NearestNeighbors(n_neighbors=k + 1).fit(coords)
+    nbrs = NearestNeighbors(n_neighbors=int(k) + 1).fit(coords)
     _, indices = nbrs.kneighbors(coords)
 
     edges = set()
