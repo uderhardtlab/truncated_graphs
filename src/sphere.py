@@ -142,7 +142,7 @@ def process_coords(coords, edge_type, cap_radii, k=None, radius_factor=None):
         n_bins = np.sqrt(len(reindexed))
 
         median = surrogate_ensemble_gt(coords=coords[crop], edge_list=reindexed, n_bins=int(n_bins), n_surrogates=NUMBER_OF_SERNS, n_jobs=N_JOBS)
-        sern_results = pd.DataFrame(median[0], index=crop)
+        sern_results = pd.DataFrame(median, index=crop)
         crop_centralities["degree"] = crop_centralities["degree"].astype(int)
         sern_results["degree"] = sern_results["degree"].astype(int)
         results = pd.concat({"original": original_centralities.sort_index(axis=0).sort_index(axis=1), "crop": crop_centralities.sort_index(axis=0).sort_index(axis=1), "distance": distances.sort_index(axis=0), "corrections": corrections.sort_index(axis=0).sort_index(axis=1), "sern": sern_results, "sern_corrected": crop_centralities.sort_index(axis=0).sort_index(axis=1)-(sern_results.sort_index(axis=0).sort_index(axis=1))}, axis=1).iloc[crop]#.dropna()

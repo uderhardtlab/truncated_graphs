@@ -60,8 +60,12 @@ def surrogate_ensemble_gt(coords, edge_list, n_bins, n_surrogates=200, n_jobs=-1
         # Clean up the temporary mmap file
         if os.path.exists(prob_path):
             os.remove(prob_path)
-
-    return results
+            
+    medians = {}
+    for key in results[0].keys():
+        values = np.array([r[key] for r in results])
+        medians[key] = np.median(values, axis=0)
+    return medians
 
 def estimate_link_probability(coords, edge_list, n_bins):
     coords = np.asarray(coords, dtype=np.float32)
