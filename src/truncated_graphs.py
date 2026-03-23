@@ -30,7 +30,11 @@ def distance_to_border(coords):
     return pd.Series(d_border, name="distance_to_border")
     
     
-def distance_to_mask(coords, mask):
+def distance_to_pointset(coords, border_points):
     #TODO
+    pass
+
+
+def distance_to_mask(coords, mask):
     pass
 
