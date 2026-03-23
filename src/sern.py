@@ -10,9 +10,6 @@ from tqdm import tqdm
 
 
 def generate_sern_vectorized(pair_probs, N, rng):
-    """
-    Vectorized edge generation to bypass slow Python loops.
-    """
     # Create the probability mask for all possible edges
     mask = rng.random(len(pair_probs)) < pair_probs
     
@@ -25,15 +22,12 @@ def generate_sern_vectorized(pair_probs, N, rng):
     return edges
 
 def surrogate_worker_mmap(seed, prob_path, N):
-    """
-    Worker that reads from a shared memory-mapped file.
-    """
     # mmap_mode='r' ensures all 128 cores read the same physical RAM
     pair_probs = joblib.load(prob_path, mmap_mode='r')
     rng = np.random.default_rng(seed)
     
     edges = generate_sern_vectorized(pair_probs, N, rng)
-    return compute_centrality_measures(edges)
+    return compute_centrality_measures(edges, N)
 
 def surrogate_ensemble_gt(coords, edge_list, n_bins, n_surrogates=200, n_jobs=-1):
     # 1. Calculate probabilities (keeping your existing logic)
@@ -61,7 +55,13 @@ def surrogate_ensemble_gt(coords, edge_list, n_bins, n_surrogates=200, n_jobs=-1
         if os.path.exists(prob_path):
             os.remove(prob_path)
 
-    return results
+    # Compute median across all surrogates
+    medians = {}
+    for key in results[0].keys():
+        values = np.array([np.asarray(r[key]) for r in results])
+        medians[key] = np.median(values, axis=0)
+    return medians
+
 
 def estimate_link_probability(coords, edge_list, n_bins):
     coords = np.asarray(coords, dtype=np.float32)
@@ -93,7 +93,7 @@ def estimate_link_probability(coords, edge_list, n_bins):
 def build_pair_probabilities(pair_bins, p):
     return p[pair_bins]
 
-def compute_centrality_measures(edge_list):
+def compute_centrality_measures(edge_list, N):
     g = Graph(directed=False)
     g.add_edge_list(edge_list)
     
@@ -107,4 +107,12 @@ def compute_centrality_measures(edge_list):
         "harmonic": closeness(g, harmonic=True).a.copy(),
         "clustering": local_clustering(g).a.copy()
     }
+    
+    for key in results:
+        arr = results[key]
+        if len(arr) < N:
+            padded = np.zeros(N)
+            padded[:len(arr)] = arr
+            results[key] = padded
+    
     return {k: list(v) for k, v in results.items()}

@@ -12,8 +12,8 @@ from sern import compute_centrality_measures, surrogate_ensemble_gt
 
 os.environ["OMP_NUM_THREADS"] = "8"
 NUMBER_OF_SERNS = 100
-N_JOBS = 16
-N_OF_RUNS = 1
+N_JOBS = 128
+N_OF_RUNS = 100
 
 
 def sample_uniform_on_unit_sphere(n, rng=None):
@@ -65,14 +65,14 @@ def process_coords(coords, edge_type, cap_radii, k=None, radius_factor=None):
         # Area of unit sphere = 4 * pi. 
         # Average area per node = 4*pi / N.
         # Equivalent radius r = sqrt((4*pi/N) / pi) = 2 / sqrt(N)
-        base_radius = 4 / np.sqrt(N)
+        base_radius = 2 / np.sqrt(N)
         r = radius_factor * base_radius
         edges = rnn_edges(coords, r=r)
     else:
         raise ValueError("Invalid edge type")
 
     original_centralities = pd.DataFrame(
-        compute_centrality_measures(edges)
+        compute_centrality_measures(edges, len(coords))
     )   
     all_correlations = list()
     
@@ -88,7 +88,7 @@ def process_coords(coords, edge_type, cap_radii, k=None, radius_factor=None):
             print("choose proper edge type")
 
         reindexed = reindex_edges_to_crop(crop_edges, crop)
-        crop_centralities = compute_centrality_measures(reindexed)
+        crop_centralities = compute_centrality_measures(reindexed, len(crop))
         crop_centralities = pd.DataFrame(crop_centralities, index=crop)
 
         measures = crop_centralities.columns
@@ -142,10 +142,10 @@ def process_coords(coords, edge_type, cap_radii, k=None, radius_factor=None):
         n_bins = np.sqrt(len(reindexed))
 
         median = surrogate_ensemble_gt(coords=coords[crop], edge_list=reindexed, n_bins=int(n_bins), n_surrogates=NUMBER_OF_SERNS, n_jobs=N_JOBS)
-        sern_results = pd.DataFrame(median[0], index=crop)
+        sern_results = pd.DataFrame(median, index=crop)
         crop_centralities["degree"] = crop_centralities["degree"].astype(int)
         sern_results["degree"] = sern_results["degree"].astype(int)
-        results = pd.concat({"original": original_centralities.sort_index(axis=0).sort_index(axis=1), "crop": crop_centralities.sort_index(axis=0).sort_index(axis=1), "distance": distances.sort_index(axis=0), "corrections": corrections.sort_index(axis=0).sort_index(axis=1), "sern": sern_results, "sern_corrected": crop_centralities.sort_index(axis=0).sort_index(axis=1)-(sern_results.sort_index(axis=0).sort_index(axis=1))}, axis=1).iloc[crop]#.dropna()
+        results = pd.concat({"original": original_centralities.sort_index(axis=0).sort_index(axis=1), "crop": crop_centralities.sort_index(axis=0).sort_index(axis=1), "distance": distances.sort_index(axis=0), "corrections": corrections.sort_index(axis=0).sort_index(axis=1), "sern": sern_results.sort_index(axis=0).sort_index(axis=1), "sern_corrected": crop_centralities.sort_index(axis=0).sort_index(axis=1)-(sern_results.sort_index(axis=0).sort_index(axis=1))}, axis=1).iloc[crop]#.dropna()
         results = results.fillna(0)
 
         corrs_original_crop = list()
@@ -185,31 +185,32 @@ if __name__ == "__main__":
 
         for (coord_type, coords) in zip(["uniform", "kappa=1", "kappa=1,3,5"], all_coords):
             for edge_type in ["delaunay", "knn", "rnn"]:
-                try:
-                    if edge_type == "delaunay":
-                        correlations = process_coords(coords, edge_type, cap_radii=[1, 2])
+                #try:
+                if edge_type == "delaunay":
+                    correlations = process_coords(coords, edge_type, cap_radii=[1, 2])
+                    correlations["graph_type"] = edge_type
+                    correlations["coord_type"] = coord_type
+                    correlations["n"] = n
+                    all_correlations.append(correlations)
+                elif edge_type == "knn":
+                    for k in [5, 10, 15]:
+                        correlations = process_coords(coords, edge_type, k=k, cap_radii=[1, 2])
+                        correlations["k"] = k
                         correlations["graph_type"] = edge_type
                         correlations["coord_type"] = coord_type
                         correlations["n"] = n
                         all_correlations.append(correlations)
-                    elif edge_type == "knn":
-                        for k in [5, 10, 15]:
-                            correlations = process_coords(coords, edge_type, k=k, cap_radii=[1, 2])
-                            correlations["k"] = k
-                            correlations["graph_type"] = edge_type
-                            correlations["coord_type"] = coord_type
-                            correlations["n"] = n
-                            all_correlations.append(correlations)
-                    elif edge_type == "rnn":
-                        for r in [1, 2, 3]:
-                            correlations = process_coords(coords, edge_type, radius_factor=r, cap_radii=[1, 2])
-                            correlations["radius_factor"] = r
-                            correlations["graph_type"] = edge_type
-                            correlations["coord_type"] = coord_type
-                            correlations["n"] = n
-                            all_correlations.append(correlations)
-                except Exception as e:
-                    print(e)
-                    failures.append((n, coord_type, edge_type))
-        print(failures)
-        pd.concat(all_correlations).to_csv(f"correlations_{time()}.csv")
+                elif edge_type == "rnn":
+                    for r in [1, 2, 3]:
+                        correlations = process_coords(coords, edge_type, radius_factor=r, cap_radii=[1, 2])
+                        correlations["radius_factor"] = r
+                        correlations["graph_type"] = edge_type
+                        correlations["coord_type"] = coord_type
+                        correlations["n"] = n
+                        all_correlations.append(correlations)
+                #except Exception as e:
+                #    print(e)
+                #    failures.append((n, coord_type, edge_type))
+        time_stamp = time()
+        print(time_stamp, failures)
+        pd.concat(all_correlations).to_csv(f"/home/woody/iwbn/iwbn007h/truncated_graphs/results/correlations/correlations_{time_stamp}.csv")
