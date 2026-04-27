@@ -13,6 +13,11 @@ import squidpy as sq
 import tifffile as tf
 from tqdm import tqdm
 
+import sys
+sys.path.append("/data/bionets/je30bery/bosporus-package")
+from bosporus import delaunay_edges, knn_edges, rnn_edges
+
+
 def get_squidpy_visium_datasets():
     all_samples = ['V1_Breast_Cancer_Block_A_Section_1', 'V1_Breast_Cancer_Block_A_Section_2', 'V1_Human_Heart', 'V1_Human_Lymph_Node', 'V1_Mouse_Kidney', 'V1_Adult_Mouse_Brain', 'V1_Mouse_Brain_Sagittal_Posterior', 'V1_Mouse_Brain_Sagittal_Posterior_Section_2', 'V1_Mouse_Brain_Sagittal_Anterior', 'V1_Mouse_Brain_Sagittal_Anterior_Section_2', 'V1_Human_Brain_Section_1', 'V1_Human_Brain_Section_2', 'V1_Adult_Mouse_Brain_Coronal_Section_1', 'V1_Adult_Mouse_Brain_Coronal_Section_2', 'Targeted_Visium_Human_Cerebellum_Neuroscience', 'Parent_Visium_Human_Cerebellum', 'Targeted_Visium_Human_SpinalCord_Neuroscience', 'Parent_Visium_Human_SpinalCord', 'Targeted_Visium_Human_Glioblastoma_Pan_Cancer', 'Parent_Visium_Human_Glioblastoma', 'Targeted_Visium_Human_BreastCancer_Immunology', 'Parent_Visium_Human_BreastCancer', 'Targeted_Visium_Human_OvarianCancer_Pan_Cancer', 'Targeted_Visium_Human_OvarianCancer_Immunology', 'Parent_Visium_Human_OvarianCancer', 'Targeted_Visium_Human_ColorectalCancer_GeneSignature', 'Parent_Visium_Human_ColorectalCancer', 'Visium_FFPE_Mouse_Brain', 'Visium_FFPE_Mouse_Brain_IF', 'Visium_FFPE_Mouse_Kidney', 'Visium_FFPE_Human_Breast_Cancer', 'Visium_FFPE_Human_Prostate_Acinar_Cell_Carcinoma', 'Visium_FFPE_Human_Prostate_Cancer', 'Visium_FFPE_Human_Prostate_IF', 'Visium_FFPE_Human_Normal_Prostate']
     coords = dict()
@@ -42,13 +47,6 @@ def get_mibitof(data_path="/data/bionets/datasets/graph_truncation/", datasets=[
             coords[name] = np.array(centroids).astype(np.int16)
     return coords
 
-def sample_points_on_square(n, xlim=1.0, ylim=1.0):
-    return np.random.uniform(
-        low=(-xlim, -ylim),
-        high=(xlim, ylim),
-        size=(n, 2),
-    )
-
 
 def spatial_subset(coords, xlim, ylim):
     mask = (
@@ -59,42 +57,6 @@ def spatial_subset(coords, xlim, ylim):
     )
     return np.where(mask)[0]
 
-
-def knn_edges(coords, k):
-    """Directed, asymmetric kNN on full set."""
-    nbrs = NearestNeighbors(n_neighbors=int(k) + 1).fit(coords)
-    _, indices = nbrs.kneighbors(coords)
-
-    edges = set()
-    for u, neighbors in enumerate(indices):
-        for v in neighbors[1:]:
-            edges.add((u, v))
-    return edges
-
-
-def rnn_edges(coords, r):
-    """Directed, asymmetric kNN on full set."""
-    nbrs = NearestNeighbors(radius=r).fit(coords)
-    _, indices = nbrs.radius_neighbors(coords, radius=r)
-
-    edges = set()
-    for u, neighbors in enumerate(indices):
-        for v in neighbors:
-            if u != v:
-                edges.add(frozenset((u, v)))
-    return edges
-
-
-def delaunay_edges(coords):
-    """Undirected Delaunay on full set."""
-    tri = Delaunay(coords)
-    edges = set()
-
-    for simplex in tri.simplices:
-        for u, v in combinations(simplex, 2):
-            edges.add(frozenset((u, v)))
-
-    return edges
 
 
 def delaunay_edges_geodesic(coords):

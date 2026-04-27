@@ -1,216 +1,232 @@
+"""
+sphere.py — Sphere benchmark using BosporusFlow
+
+Evaluates border-effect correction methods (piecewise-linear / exp-saturation
+fits and SERN) on synthetic point clouds on the unit sphere.  All graph
+construction, centrality computation, distance calculation, fitting and
+evaluation now delegate to the bosporus package via BosporusFlow.
+"""
+
 import numpy as np
-import os
 import pandas as pd
+from scipy.spatial import ConvexHull
 from scipy.stats import pearsonr, vonmises_fisher
+
 from time import time
 from tqdm import trange
 
-from border_effects_kNN_del import knn_edges, rnn_edges, delaunay_edges_geodesic, delaunay_edges_on_subset_geodesic, knn_edges_on_subset, rnn_edges_on_subset, crop_and_dist_cap, reindex_edges_to_crop
-from fit import fit_exponential_saturation, fit_piece_wise_linear, fit_constant, piecewise_plateau, exp_sat
-from evaluate_fit import log_likelihood, akaike_information_criterion
-from sern import compute_centrality_measures, surrogate_ensemble_gt
+from bosporus import BosporusFlow
+from bosporus.centrality_measures import compute_centrality_measures
+from bosporus.distances import distance_to_convex_hull
 
+from sern import surrogate_ensemble_gt
+
+import os
 os.environ["OMP_NUM_THREADS"] = "8"
+
 NUMBER_OF_SERNS = 100
-N_JOBS = 128
-N_OF_RUNS = 100
+N_JOBS = 60
+N_OF_RUNS = 2
+
+OUTPUT_DIR = "../results/figure4"
 
 
 def sample_uniform_on_unit_sphere(n, rng=None):
+    """Uniform sampling on S² via cylindrical projection."""
     if rng is None:
         rng = np.random.default_rng()
-
     u = rng.uniform(-1, 1, n)
-    theta = rng.uniform(0, 2*np.pi, n)
-
-    r = np.sqrt(1 - u**2)
-
-    x = r * np.cos(theta)
-    y = r * np.sin(theta)
-    z = u
-
-    return np.column_stack((x, y, z))
+    theta = rng.uniform(0, 2 * np.pi, n)
+    r = np.sqrt(1 - u ** 2)
+    return np.column_stack((r * np.cos(theta), r * np.sin(theta), u))
 
 
 def sample_von_mises_fisher(n, kappas, rng=None):
-
+    """Clustered sampling on S² via von Mises–Fisher mixture."""
     if rng is None:
         rng = np.random.default_rng()
-
     if len(kappas) == 1:
         mu = sample_uniform_on_unit_sphere(1, rng=rng)[0]
-        vmf = vonmises_fisher(mu=mu, kappa=kappas[0])
-        return vmf.rvs(size=n, random_state=rng)
-
-    coords = []
+        return vonmises_fisher(mu=mu, kappa=kappas[0]).rvs(size=n, random_state=rng)
     per_cluster = n // len(kappas)
-
-    for kappa in kappas:
-        coords.append(
-            sample_von_mises_fisher(per_cluster, [kappa], rng=rng)
-        )
-    return np.vstack(coords)
+    return np.vstack([
+        sample_von_mises_fisher(per_cluster, [k], rng=rng) for k in kappas
+    ])
 
 
+def _spherical_delaunay_edges(coords):
+    """Geodesic Delaunay triangulation via convex hull on unit-sphere coords."""
+    hull = ConvexHull(coords)
+    edges = set()
+    for simplex in hull.simplices:
+        edges.add(frozenset((simplex[0], simplex[1])))
+        edges.add(frozenset((simplex[1], simplex[2])))
+        edges.add(frozenset((simplex[2], simplex[0])))
+    return edges
 
-def process_coords(coords, edge_type, cap_radii, k=None, radius_factor=None):
-    N = len(coords)
-    
+
+def get_edge_list(coords, edge_type, k=None, r=None):
     if edge_type == "delaunay":
-        edges = delaunay_edges_geodesic(coords)
-    elif edge_type == "knn":
-        edges = knn_edges(coords, k=k)
+        return _spherical_delaunay_edges(coords)
+    # For knn / rnn we can reuse bosporus graph construction directly,
+    # because in 3-D Euclidean space the ordering of Euclidean distances
+    # equals the ordering of geodesic distances on the unit sphere.
+    flow = BosporusFlow(coords)
+    if edge_type == "knn":
+        flow.construct_graph("knn", {"k": k})
     elif edge_type == "rnn":
-        # Spherical Base Radius Calculation:
-        # Area of unit sphere = 4 * pi. 
-        # Average area per node = 4*pi / N.
-        # Equivalent radius r = sqrt((4*pi/N) / pi) = 2 / sqrt(N)
-        base_radius = 2 / np.sqrt(N)
-        r = radius_factor * base_radius
-        edges = rnn_edges(coords, r=r)
+        flow.construct_graph("rnn", {"r": r})
     else:
-        raise ValueError("Invalid edge type")
+        raise ValueError(f"Unknown edge type: {edge_type}")
+    return flow.edge_list
 
-    original_centralities = pd.DataFrame(
-        compute_centrality_measures(edges, len(coords))
-    )   
-    all_correlations = list()
-    
+
+def crop_cap(coords, cap_radius):
+    center = coords[np.random.choice(len(coords))]
+    dot = np.clip(coords @ center, -1.0, 1.0)
+    geo_dist_to_center = np.arccos(dot)
+    inside = np.where(geo_dist_to_center <= cap_radius)[0]
+    dist_to_border = cap_radius - geo_dist_to_center[inside]
+    return inside, pd.Series(dist_to_border, index=inside, name="distance_to_cap")
+
+
+def get_bosporus_corrections(crop_coords, edges, measures, distances):
+    bf = BosporusFlow(crop_coords)
+    bf.edge_list = edges
+    bf.compute_centralities(measures=measures)
+    bf.df = pd.concat([bf.df, distances.reset_index(drop=True)], axis=1)
+    bf.fit_models(measures=measures, distance_key="distance_to_cap")
+    bf.df["degree"] = bf.df["degree"].astype(int)
+    return bf.df
+
+
+def get_sern_median(crop_coords, local_edges):
+    n_bins = int(np.sqrt(len(local_edges)))
+    sern_median = surrogate_ensemble_gt(
+        coords=crop_coords,
+        edge_list=local_edges,
+        n_bins=n_bins,
+        n_surrogates=NUMBER_OF_SERNS,
+        n_jobs=N_JOBS,
+    )
+    sern_median = pd.DataFrame(sern_median)
+    sern_median["degree"] = sern_median["degree"].astype(int)
+    return sern_median
+
+
+def process_coords(coords, edge_type, cap_radii, k=None, r=None):
+    N = len(coords)
+
+    # --- global graph & centralities ---
+    global_edges = get_edge_list(coords, edge_type, k=k, r=r)
+    global_centralities = pd.DataFrame(
+        compute_centrality_measures(global_edges, N)
+    )
+    measures = global_centralities.columns
+
+    all_correlations = []
+
     for cap_radius in cap_radii:
-        crop, distances = crop_and_dist_cap(coords, radius_geodesic=cap_radius)
-        if edge_type == "delaunay":
-            crop_edges = delaunay_edges_on_subset_geodesic(coords, crop)
-        elif edge_type == "knn":
-            crop_edges = knn_edges_on_subset(coords, crop, k=k)
-        elif edge_type == "rnn":
-            crop_edges = rnn_edges_on_subset(coords, crop, r=r)
-        else:
-            print("choose proper edge type")
+        crop, distances = crop_cap(coords, cap_radius)
+        crop_coords = coords[crop]
 
-        reindexed = reindex_edges_to_crop(crop_edges, crop)
-        crop_centralities = compute_centrality_measures(reindexed, len(crop))
-        crop_centralities = pd.DataFrame(crop_centralities, index=crop)
 
-        measures = crop_centralities.columns
-        distances_and_centralities = pd.concat({"distance": distances, "centrality": crop_centralities.sort_index()}, axis=1).dropna().sort_index()
+        local_edges = get_edge_list(coords[crop], edge_type, k=k, r=r)        
+        BOSPORUS_results = get_bosporus_corrections(crop_coords, local_edges, measures, distances)
+        sern_median = get_sern_median(coords[crop], local_edges)
 
-        d = distances_and_centralities[("distance", "distance_to_border")].values
-        methods = list()
-        rel_ll = list()
-        corrections = pd.DataFrame(columns=measures) 
-        
+        # --- assemble result frame ---
+        results = pd.concat(
+            {
+                "original": global_centralities.loc[crop].sort_index(axis=0).sort_index(axis=1),
+                "crop": BOSPORUS_results[measures].sort_index(axis=0).sort_index(axis=1),
+                "distance": BOSPORUS_results["distance_to_cap"],
+                "BOSPORUS_corrections": BOSPORUS_results.filter(like="BOSPORUS", axis=1).sort_index(axis=0).sort_index(axis=1),
+                "sern": sern_median.sort_index(axis=0).sort_index(axis=1),
+                "sern_corrected": (
+                    BOSPORUS_results[measures].sort_index(axis=0).sort_index(axis=1)
+                    - sern_median.sort_index(axis=0).sort_index(axis=1)
+                ),
+            },
+            axis=1,
+        ).iloc[crop].fillna(0)
+
+        # --- correlations ---
+        corrs_original_crop, corrs_original_corrected = [], []
+        corrs_original_sern, corrs_crop_sern = [], []
+
         for m in measures:
-            C = distances_and_centralities[("centrality", m)].sort_index()
-            try:
-                m_pieli, c_pieli, b_pieli, C_pieli = fit_piece_wise_linear(d, C)
-            except:
-                m_pieli, c_pieli, b_pieli, C_pieli = np.nan, np.nan, np.nan, np.zeros_like(C)
-            ll_pieli = log_likelihood(C, C_pieli)
-            aic_pieli = akaike_information_criterion(4, ll_pieli)
-            
-            try:
-                a_exp, b_exp, c_exp, C_exp = fit_exponential_saturation(d, C)
-            except:
-                a_exp, b_exp, c_exp, C_exp = np.nan, np.nan, np.nan, np.zeros_like(C)
-            ll_exp = log_likelihood(C, C_exp)
-            aic_exp = akaike_information_criterion(4, ll_exp)
-            
-            const, C_const = fit_constant(C)
-            ll_const = log_likelihood(C, C_const)
-            aic_const = akaike_information_criterion(2, ll_const)
-                        
-            if aic_const == np.min([aic_const, aic_pieli, aic_exp]):
-                C_corrected = C
-                methods.append("original")
-                rel_ll.append(1.0)
-            else:
-                if aic_pieli < aic_exp:
-                    plateau = m_pieli * b_pieli + c_pieli
-                    C_corrected = C + plateau - piecewise_plateau(d, b_pieli, m_pieli, c_pieli)
-                    methods.append("pieli")
-                    rel_ll.append(np.exp((aic_const - aic_pieli) / (2 * len(C)))) # Removed len(C)
-                else:
-                    plateau = a_exp + c_exp
-                    C_corrected = C + plateau - exp_sat(d, a=a_exp, b=b_exp, c=c_exp)
-                    
-                    methods.append("exp")
-                    rel_ll.append(np.exp((aic_const - aic_exp) / (2 * len(C)))) # Removed len(C)
-        
-            corrections[m] = C_corrected
-        
-        reindexed = reindex_edges_to_crop(crop_edges, crop)
-        n_bins = np.sqrt(len(reindexed))
-
-        median = surrogate_ensemble_gt(coords=coords[crop], edge_list=reindexed, n_bins=int(n_bins), n_surrogates=NUMBER_OF_SERNS, n_jobs=N_JOBS)
-        sern_results = pd.DataFrame(median, index=crop)
-        crop_centralities["degree"] = crop_centralities["degree"].astype(int)
-        sern_results["degree"] = sern_results["degree"].astype(int)
-        results = pd.concat({"original": original_centralities.sort_index(axis=0).sort_index(axis=1), "crop": crop_centralities.sort_index(axis=0).sort_index(axis=1), "distance": distances.sort_index(axis=0), "corrections": corrections.sort_index(axis=0).sort_index(axis=1), "sern": sern_results.sort_index(axis=0).sort_index(axis=1), "sern_corrected": crop_centralities.sort_index(axis=0).sort_index(axis=1)-(sern_results.sort_index(axis=0).sort_index(axis=1))}, axis=1).iloc[crop]#.dropna()
-        results = results.fillna(0)
-
-        corrs_original_crop = list()
-        corrs_original_corrected = list()
-        corrs_original_sern = list()
-        corrs_crop_sern = list()
-        
-        for m in measures:
-            corrs_original_crop.append(pearsonr(results["original"][m], results["crop"][m]).statistic)
-            corrs_original_corrected.append(pearsonr(results["original"][m], results["corrections"][m]).statistic)
-            corrs_original_sern.append(pearsonr(results["original"][m], results["sern_corrected"][m]).statistic)
-            corrs_crop_sern.append(pearsonr(results["crop"][m], results["sern"][m]).statistic)
+            corrs_original_crop.append(
+                pearsonr(results["original"][m], results["crop"][m]).statistic
+            )
+            corrs_original_corrected.append(
+                pearsonr(results["original"][m], results["BOSPORUS_corrections"][m]).statistic
+            )
+            corrs_original_sern.append(
+                pearsonr(results["original"][m], results["sern_corrected"][m]).statistic
+            )
+            corrs_crop_sern.append(
+                pearsonr(results["crop"][m], results["sern"][m]).statistic
+            )
 
         correlations = pd.DataFrame(index=measures)
         correlations["original vs. on crop"] = corrs_original_crop
-        correlations["original vs. corrected on crop"] = corrs_original_corrected
+        correlations["original vs. BOSPORUS corrected on crop"] = corrs_original_corrected
         correlations["original vs. SERN corrected on crop"] = corrs_original_sern
         correlations["on crop vs. SERN values"] = corrs_crop_sern
-        
-        correlations["model"] = methods
-        correlations["relative_likelihood"] = rel_ll
         correlations["cap_radius"] = cap_radius
         all_correlations.append(correlations)
     return pd.concat(all_correlations)
 
 
 if __name__ == "__main__":
-    failures = list()
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+
     n = 5000
     for _ in trange(N_OF_RUNS):
-        all_correlations = list()
+        all_correlations = []
 
-        all_coords = list()
-        all_coords.append(sample_uniform_on_unit_sphere(n=n))
-        all_coords.append(sample_von_mises_fisher(n=n, kappas=[1]))
-        all_coords.append(sample_von_mises_fisher(n=n, kappas=[1, 3, 5]))
+        coord_configs = [
+            ("uniform", sample_uniform_on_unit_sphere(n=n)),
+            ("kappa=1", sample_von_mises_fisher(n=n, kappas=[1])),
+            ("kappa=1,3,5", sample_von_mises_fisher(n=n, kappas=[1, 3, 5])),
+        ]
 
-        for (coord_type, coords) in zip(["uniform", "kappa=1", "kappa=1,3,5"], all_coords):
+        for coord_type, coords in coord_configs:
             for edge_type in ["delaunay", "knn", "rnn"]:
-                #try:
+                base_kwargs = dict(
+                    coords=coords,
+                    edge_type=edge_type,
+                    cap_radii=[1, 2],
+                )
+
                 if edge_type == "delaunay":
-                    correlations = process_coords(coords, edge_type, cap_radii=[1, 2])
-                    correlations["graph_type"] = edge_type
-                    correlations["coord_type"] = coord_type
-                    correlations["n"] = n
-                    all_correlations.append(correlations)
+                    corr = process_coords(**base_kwargs)
+                    corr["graph_type"] = edge_type
+                    corr["coord_type"] = coord_type
+                    corr["n"] = n
+                    all_correlations.append(corr)
+
                 elif edge_type == "knn":
                     for k in [5, 10, 15]:
-                        correlations = process_coords(coords, edge_type, k=k, cap_radii=[1, 2])
-                        correlations["k"] = k
-                        correlations["graph_type"] = edge_type
-                        correlations["coord_type"] = coord_type
-                        correlations["n"] = n
-                        all_correlations.append(correlations)
+                        corr = process_coords(**base_kwargs, k=k)
+                        corr["k"] = k
+                        corr["graph_type"] = edge_type
+                        corr["coord_type"] = coord_type
+                        corr["n"] = n
+                        all_correlations.append(corr)
+
                 elif edge_type == "rnn":
-                    for r in [1, 2, 3]:
-                        correlations = process_coords(coords, edge_type, radius_factor=r, cap_radii=[1, 2])
-                        correlations["radius_factor"] = r
-                        correlations["graph_type"] = edge_type
-                        correlations["coord_type"] = coord_type
-                        correlations["n"] = n
-                        all_correlations.append(correlations)
-                #except Exception as e:
-                #    print(e)
-                #    failures.append((n, coord_type, edge_type))
-        time_stamp = time()
-        print(time_stamp, failures)
-        pd.concat(all_correlations).to_csv(f"/home/woody/iwbn/iwbn007h/truncated_graphs/results/correlations/correlations_{time_stamp}.csv")
+                    for r in [0.05, 0.1, 0.15]:
+                        corr = process_coords(**base_kwargs, radius=r)
+                        corr["radius"] = r
+                        corr["graph_type"] = edge_type
+                        corr["coord_type"] = coord_type
+                        corr["n"] = n
+                        all_correlations.append(corr)
+
+        timestamp = time()
+        out_path = os.path.join(
+            OUTPUT_DIR, f"correlations_{timestamp}.csv"
+        )
+        pd.concat(all_correlations).to_csv(out_path)

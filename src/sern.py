@@ -2,11 +2,12 @@ import numpy as np
 import os
 import joblib
 from scipy.spatial.distance import pdist
-from graph_tool.all import Graph
-from graph_tool.centrality import betweenness, pagerank, closeness
-from graph_tool.clustering import local_clustering
 from joblib import Parallel, delayed
 from tqdm import tqdm
+
+import sys
+sys.path.append("../../bosporus-package/")
+from bosporus import *
 
 
 def generate_sern_vectorized(pair_probs, N, rng):
@@ -59,7 +60,12 @@ def surrogate_ensemble_gt(coords, edge_list, n_bins, n_surrogates=200, n_jobs=-1
     medians = {}
     for key in results[0].keys():
         values = np.array([np.asarray(r[key]) for r in results])
-        medians[key] = np.median(values, axis=0)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=RuntimeWarning)
+            measure_medians = np.nanmedian(values, axis=0)
+
+        measure_medians = np.nan_to_num(measure_medians, nan=0)
+        medians[key] = measure_medians
     return medians
 
 
@@ -93,26 +99,3 @@ def estimate_link_probability(coords, edge_list, n_bins):
 def build_pair_probabilities(pair_bins, p):
     return p[pair_bins]
 
-def compute_centrality_measures(edge_list, N):
-    g = Graph(directed=False)
-    g.add_edge_list(edge_list)
-    
-    # Pre-allocate results with .a.copy() to ensure data is returned 
-    # as standard numpy arrays before the process terminates.
-    results = {
-        "degree": g.get_total_degrees(range(g.num_vertices())).copy(),
-        "pagerank": pagerank(g).a.copy(),
-        "betweenness": betweenness(g)[0].a.copy(),
-        "closeness": closeness(g).a.copy(),
-        "harmonic": closeness(g, harmonic=True).a.copy(),
-        "clustering": local_clustering(g).a.copy()
-    }
-    
-    for key in results:
-        arr = results[key]
-        if len(arr) < N:
-            padded = np.zeros(N)
-            padded[:len(arr)] = arr
-            results[key] = padded
-    
-    return {k: list(v) for k, v in results.items()}
