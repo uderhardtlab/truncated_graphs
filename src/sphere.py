@@ -17,7 +17,6 @@ from tqdm import trange
 
 from bosporus import BosporusFlow
 from bosporus.centrality_measures import compute_centrality_measures
-from bosporus.distances import distance_to_convex_hull
 
 from sern import surrogate_ensemble_gt
 
@@ -25,8 +24,8 @@ import os
 os.environ["OMP_NUM_THREADS"] = "8"
 
 NUMBER_OF_SERNS = 100
-N_JOBS = 60
-N_OF_RUNS = 2
+N_JOBS = 128
+N_OF_RUNS = 100
 
 OUTPUT_DIR = "../results/figure4"
 
@@ -123,7 +122,6 @@ def process_coords(coords, edge_type, cap_radii, k=None, r=None):
         compute_centrality_measures(global_edges, N)
     )
     measures = global_centralities.columns
-
     all_correlations = []
 
     for cap_radius in cap_radii:
@@ -131,14 +129,14 @@ def process_coords(coords, edge_type, cap_radii, k=None, r=None):
         crop_coords = coords[crop]
 
 
-        local_edges = get_edge_list(coords[crop], edge_type, k=k, r=r)        
+        local_edges = get_edge_list(crop_coords, edge_type, k=k, r=r)        
         BOSPORUS_results = get_bosporus_corrections(crop_coords, local_edges, measures, distances)
-        sern_median = get_sern_median(coords[crop], local_edges)
+        sern_median = get_sern_median(crop_coords, local_edges)
 
         # --- assemble result frame ---
         results = pd.concat(
             {
-                "original": global_centralities.loc[crop].sort_index(axis=0).sort_index(axis=1),
+                "original": global_centralities.loc[crop].sort_index(axis=0).sort_index(axis=1).reset_index(drop=True),
                 "crop": BOSPORUS_results[measures].sort_index(axis=0).sort_index(axis=1),
                 "distance": BOSPORUS_results["distance_to_cap"],
                 "BOSPORUS_corrections": BOSPORUS_results.filter(like="BOSPORUS", axis=1).sort_index(axis=0).sort_index(axis=1),
@@ -149,7 +147,7 @@ def process_coords(coords, edge_type, cap_radii, k=None, r=None):
                 ),
             },
             axis=1,
-        ).iloc[crop].fillna(0)
+        )
 
         # --- correlations ---
         corrs_original_crop, corrs_original_corrected = [], []
@@ -160,7 +158,7 @@ def process_coords(coords, edge_type, cap_radii, k=None, r=None):
                 pearsonr(results["original"][m], results["crop"][m]).statistic
             )
             corrs_original_corrected.append(
-                pearsonr(results["original"][m], results["BOSPORUS_corrections"][m]).statistic
+                pearsonr(results["original"][m], results["BOSPORUS_corrections"][f"BOSPORUS corrected {m}"]).statistic
             )
             corrs_original_sern.append(
                 pearsonr(results["original"][m], results["sern_corrected"][m]).statistic
@@ -218,7 +216,7 @@ if __name__ == "__main__":
 
                 elif edge_type == "rnn":
                     for r in [0.05, 0.1, 0.15]:
-                        corr = process_coords(**base_kwargs, radius=r)
+                        corr = process_coords(**base_kwargs, r=r)
                         corr["radius"] = r
                         corr["graph_type"] = edge_type
                         corr["coord_type"] = coord_type
