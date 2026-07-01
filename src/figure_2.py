@@ -5,12 +5,12 @@ import sys
 from tqdm import tqdm
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
-sys.path.append("../../bosporus-package/")
-from bosporus import *
+sys.path.append("../../bosperrus-package/")
+from bosperrus import *
+from bosperrus.distances import distance_to_convex_hull
 
 
 def get_fits(dataset, coordinates, graph_type):
-
     params = dict()
     graph_type_1 = graph_type.split("_")[0]
     
@@ -27,12 +27,16 @@ def get_fits(dataset, coordinates, graph_type):
         params[param] = value
     else:
         params = None
-    bf = BosporusFlow(coordinates=coordinates)
-    bf.run_all(graph_type_1, params, bf.compute_distance_to_convex_hull)
+    try:
+        bf = Flow.from_coords(coordinates=coordinates, distance_fn=distance_to_convex_hull, measures=["degree", "pagerank", "betweenness", "closeness", "clustering"], graph_type=graph_type_1, distance_kwargs=None, graph_kwargs=params)
+        bf.flow()
+    except ValueError as e:
+        print(f"Error processing {dataset} with graph type {graph_type}: {e}")
+        return pd.DataFrame()  # Return an empty DataFrame on error
 
-    result = bf.fit_quality
+    result = bf.fit_quality.T
     result["dataset"] = dataset
-    result["num_edges"] = len(bf.edge_list)
+    result["num_edges"] = len(bf._edge_list)
     result["num_nodes"] = len(coordinates)
     return result
 
@@ -58,7 +62,9 @@ def main(graph_types = ["delaunay", "knn_k=5", "knn_k=10", "knn_k=15", "rnn_r=0.
         datasets = pickle.load(f)
         del datasets["glioma_mibitof:CHOP_907_R1C6_whole_cell.tiff"] # this guy only has 3 cells
     
-    
+    #test_key = list(datasets.keys())[0]
+    #print(get_fits(test_key, datasets[test_key], "knn_k=5"))
+
     conconc = list() # ha ha 
     for graph_type in graph_types:
         conc = get_fit_data(datasets, graph_type)

@@ -6,8 +6,8 @@ from joblib import Parallel, delayed
 from tqdm import tqdm
 
 import sys
-sys.path.append("../../bosporus-package/")
-from bosporus import *
+sys.path.append("../../bosperrus-package/")
+from bosperrus import *
 
 
 def generate_sern_vectorized(pair_probs, N, rng):

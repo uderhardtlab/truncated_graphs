@@ -1,10 +1,10 @@
 """
-sphere.py — Sphere benchmark using BosporusFlow
+sphere.py — Sphere benchmark using the bosperrus Flow class
 
 Evaluates border-effect correction methods (piecewise-linear / exp-saturation
 fits and SERN) on synthetic point clouds on the unit sphere.  All graph
 construction, centrality computation, distance calculation, fitting and
-evaluation now delegate to the bosporus package via BosporusFlow.
+evaluation now delegate to the bosperrus package via the Flow class.
 """
 
 import numpy as np
@@ -15,8 +15,8 @@ from scipy.stats import pearsonr, vonmises_fisher
 from time import time
 from tqdm import trange
 
-from bosporus import BosporusFlow
-from bosporus.centrality_measures import compute_centrality_measures
+from bosperrus import Flow, construct_graph
+from bosperrus.centrality_measures import compute_centrality_measures
 
 from sern import surrogate_ensemble_gt
 
@@ -67,17 +67,15 @@ def _spherical_delaunay_edges(coords):
 def get_edge_list(coords, edge_type, k=None, r=None):
     if edge_type == "delaunay":
         return _spherical_delaunay_edges(coords)
-    # For knn / rnn we can reuse bosporus graph construction directly,
+    # For knn / rnn we can reuse bosperrus graph construction directly,
     # because in 3-D Euclidean space the ordering of Euclidean distances
     # equals the ordering of geodesic distances on the unit sphere.
-    flow = BosporusFlow(coords)
     if edge_type == "knn":
-        flow.construct_graph("knn", {"k": k})
+        return construct_graph(coords, "knn", k=k)
     elif edge_type == "rnn":
-        flow.construct_graph("rnn", {"r": r})
+        return construct_graph(coords, "rnn", r=r)
     else:
         raise ValueError(f"Unknown edge type: {edge_type}")
-    return flow.edge_list
 
 
 def crop_cap(coords, cap_radius):
@@ -89,14 +87,15 @@ def crop_cap(coords, cap_radius):
     return inside, pd.Series(dist_to_border, index=inside, name="distance_to_cap")
 
 
-def get_bosporus_corrections(crop_coords, edges, measures, distances):
-    bf = BosporusFlow(crop_coords)
-    bf.edge_list = edges
-    bf.compute_centralities(measures=measures)
-    bf.df = pd.concat([bf.df, distances.reset_index(drop=True)], axis=1)
-    bf.fit_models(measures=measures, distance_key="distance_to_cap")
-    bf.df["degree"] = bf.df["degree"].astype(int)
-    return bf.df
+def get_bosperrus_corrections(crop_coords, edges, measures, distances):
+    scores = compute_centrality_measures(edges, N=len(crop_coords), measures=list(measures))
+    bf = Flow.from_distances_and_scores(
+        distances=distances.reset_index(drop=True),
+        scores=scores,
+    )
+    bf.flow(measures=list(measures))
+    bf.observations["degree"] = bf.observations["degree"].astype(int)
+    return bf.observations
 
 
 def get_sern_median(crop_coords, local_edges):
@@ -129,20 +128,20 @@ def process_coords(coords, edge_type, cap_radii, k=None, r=None):
         crop_coords = coords[crop]
 
 
-        local_edges = get_edge_list(crop_coords, edge_type, k=k, r=r)        
-        BOSPORUS_results = get_bosporus_corrections(crop_coords, local_edges, measures, distances)
+        local_edges = get_edge_list(crop_coords, edge_type, k=k, r=r)
+        BOSPERRUS_results = get_bosperrus_corrections(crop_coords, local_edges, measures, distances)
         sern_median = get_sern_median(crop_coords, local_edges)
 
         # --- assemble result frame ---
         results = pd.concat(
             {
                 "original": global_centralities.loc[crop].sort_index(axis=0).sort_index(axis=1).reset_index(drop=True),
-                "crop": BOSPORUS_results[measures].sort_index(axis=0).sort_index(axis=1),
-                "distance": BOSPORUS_results["distance_to_cap"],
-                "BOSPORUS_corrections": BOSPORUS_results.filter(like="BOSPORUS", axis=1).sort_index(axis=0).sort_index(axis=1),
+                "crop": BOSPERRUS_results[measures].sort_index(axis=0).sort_index(axis=1),
+                "distance": BOSPERRUS_results["distance_to_cap"],
+                "BOSPERRUS_corrections": BOSPERRUS_results.filter(like="BOSPERRUS", axis=1).sort_index(axis=0).sort_index(axis=1),
                 "sern": sern_median.sort_index(axis=0).sort_index(axis=1),
                 "sern_corrected": (
-                    BOSPORUS_results[measures].sort_index(axis=0).sort_index(axis=1)
+                    BOSPERRUS_results[measures].sort_index(axis=0).sort_index(axis=1)
                     - sern_median.sort_index(axis=0).sort_index(axis=1)
                 ),
             },
@@ -158,7 +157,7 @@ def process_coords(coords, edge_type, cap_radii, k=None, r=None):
                 pearsonr(results["original"][m], results["crop"][m]).statistic
             )
             corrs_original_corrected.append(
-                pearsonr(results["original"][m], results["BOSPORUS_corrections"][f"BOSPORUS corrected {m}"]).statistic
+                pearsonr(results["original"][m], results["BOSPERRUS_corrections"][f"BOSPERRUS corrected {m}"]).statistic
             )
             corrs_original_sern.append(
                 pearsonr(results["original"][m], results["sern_corrected"][m]).statistic
@@ -169,7 +168,7 @@ def process_coords(coords, edge_type, cap_radii, k=None, r=None):
 
         correlations = pd.DataFrame(index=measures)
         correlations["original vs. on crop"] = corrs_original_crop
-        correlations["original vs. BOSPORUS corrected on crop"] = corrs_original_corrected
+        correlations["original vs. BOSPERRUS corrected on crop"] = corrs_original_corrected
         correlations["original vs. SERN corrected on crop"] = corrs_original_sern
         correlations["on crop vs. SERN values"] = corrs_crop_sern
         correlations["cap_radius"] = cap_radius
