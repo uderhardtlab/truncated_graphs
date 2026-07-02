@@ -43,6 +43,30 @@ Despite this broad awareness of boundary effects across related fields, the spec
 
 
 \section*{Results}
+\subsection*{\texttt{bosperrus}: a pipeline for modelling and correcting spatial bias}
+
+\texttt{bosperrus} is a general-purpose pipeline for detecting, quantifying, and correcting saturation-type spatial bias: any situation where per-node scores depend systematically on proximity to a spatial reference and are expected to plateau at a stable value far from it.
+While the motivating application is border-induced centrality bias, the framework is not limited to graph-theoretic measures or to borders: the scores can be arbitrary continuous node attributes — centralities, gene expression levels, morphological features — and the spatial reference can be any structure of interest.
+
+The pipeline accepts as input a per-node distance vector and one or more score vectors, and is agnostic to how these quantities were derived, supporting four levels of entry.
+Users who start from raw node coordinates can let \texttt{bosperrus} construct the proximity graph, compute distances, and calculate centrality scores in a single call.
+Those with a pre-specified edge list can skip graph construction; those with pre-computed scores can skip both; and those working with purely tabular data --- a distance vector and a score matrix --- need not provide coordinates at all, enabling seamless integration with existing pipelines.
+When coordinates are available, distances can be measured to the convex hull of all node positions, to an axis-aligned bounding rectangle, to a user-supplied point set (e.g.\ the positions of a specific cell type), or to a binary mask.
+The point-set and tabular entry points together make \texttt{bosperrus} applicable beyond strict border effects: for instance, one can test whether any continuous node score decays with distance from a particular anatomical structure or cell population, regardless of whether that structure constitutes a true boundary.
+
+The pipeline then proceeds in three stages, illustrated on a representative MIBITOF image in \Cref{fig:rel_ll}a--d.
+In the first stage, four parametric models are fitted to the observed pairs $\{(d_n, C_n)\}$ for each score (\Cref{fig:rel_ll}c): a constant (null) model; a piecewise linear model with a single elbow and plateau; an exponential saturation model; and a Michaelis-Menten model (see Methods for functional forms).
+In the second stage, the AIC-best model is selected (\Cref{fig:rel_ll}d); the scaled relative likelihood $R_{\mathrm{scaled}}$ and the AIC-weight entropy $H_{\mathrm{AIC}}$ serve as diagnostic statistics quantifying effect strength and model-selection certainty (see Methods).
+In the third stage, when a saturation model is AIC-selected, an additive correction shifts each node's score to the plateau of the fitted model:
+\begin{equation}
+    \hat{C}_n = C_n + \underbrace{\bigl(C_{\text{plateau}} - \hat{C}_{\text{model}}(d_n)\bigr)}_{\Delta(d_n)},
+    \label{eq:correction}
+\end{equation}
+where $C_{\text{plateau}} = a + c$ for the exponential saturation and Michaelis-Menten models and $C_{\text{plateau}} = m \cdot b + c$ for the piecewise linear model.
+If the constant model is AIC-selected, no correction is applied and $\hat{C}_n = C_n$.
+
+In the following subsections, we first characterize the edge-structural changes induced by truncation (\Cref{fig:trunc}), then demonstrate systematic centrality distortions on biological spatial omics data (\Cref{fig:rel_ll}e,f), and finally validate the correction against known ground-truth centralities on a sphere benchmark (\Cref{fig:sphere_correlations}).
+
 \subsection*{Truncation introduces long, asymmetric edges in proximity-induced graphs}
 \begin{figure}
     \centering
@@ -84,11 +108,7 @@ To quantify the dependence of each centrality measure on border distance, we use
 
 To evaluate whether the \texttt{bosperrus} correction recovers ground-truth centralities, we adopted a simulation strategy inspired by \citet{rheinwalt2012boundary}, using the unit sphere as a borderless reference geometry. We simulated $n=5{,}000$ nodes per run under three spatial distributions: uniform on the sphere, a single von Mises-Fisher (vMF) distribution ($\kappa=1$, random $\mu$), and a mixture of three vMF components ($\kappa\in\{1,3,5\}$, random $\mu$), designed to produce varying degrees of spatial clustering. From each configuration, we randomly cropped a spherical cap of geodesic radius $g\in[1,2]$ and treated the retained nodes as the ROI. Ground-truth centralities $C_{global}$ were computed on graphs built over all nodes; ROI centralities $C_{ROI}$ were computed on graphs restricted to the cap.
 
-We evaluated all three graph types considered throughout this study — Delaunay triangulation, $k$-NN graphs ($k\in\{5,10,15\}$), and radius graphs ($r\in\{0.05,0.1,0.15\}$) — both globally and on the cap. \texttt{bosperrus} was applied to correct $C_{ROI}$ using the AIC-selected best fit, yielding corrected centralities $\hat{C}_{ROI} = C_{ROI} + \Delta(d)$, where the additive compensation term $\Delta(d)$ shifts each node's centrality towards the plateau of the fitted model (see \Cref{eq:correction} in Methods):
-\begin{equation}
-    \Delta(d) = C_{\text{plateau}} - C_{\text{model}}(d),
-\end{equation}
-with $C_{\text{plateau}} = a+c$ for the exponential and Michaelis-Menten models and $C_{\text{plateau}} = m \cdot b + c$ for the piecewise linear model. As a competitor, we computed $n=100$ spatially embedded random networks (SERNs) \citep{barnett2007spatially} as proposed by \citet{rheinwalt2012boundary}, retrieved their median centralities $C_{SERN}$, and obtained SERN-corrected values as $\hat{C}_{SERN} = C_{ROI} - C_{SERN}$. We assessed performance as the Pearson correlation of each corrected or uncorrected score with $C_{global}$, and for each run determined which method achieved the highest correlation. The full benchmark comprised $12{,}600$ runs per centrality measure, spanning all combinations of node distribution, cap size, graph type, and graph parameters.
+We evaluated all three graph types considered throughout this study — Delaunay triangulation, $k$-NN graphs ($k\in\{5,10,15\}$), and radius graphs ($r\in\{0.05,0.1,0.15\}$) — both globally and on the cap. \texttt{bosperrus} was applied to correct $C_{ROI}$ using the AIC-selected best fit, yielding corrected centralities $\hat{C}_{ROI} = C_{ROI} + \Delta(d)$, where the additive compensation term $\Delta(d) = C_{\text{plateau}} - C_{\text{model}}(d)$ shifts each node's centrality to the plateau of the fitted model (\Cref{eq:correction}). As a competitor, we computed $n=100$ spatially embedded random networks (SERNs) \citep{barnett2007spatially} as proposed by \citet{rheinwalt2012boundary}, retrieved their median centralities $C_{SERN}$, and obtained SERN-corrected values as $\hat{C}_{SERN} = C_{ROI} - C_{SERN}$. We assessed performance as the Pearson correlation of each corrected or uncorrected score with $C_{global}$, and for each run determined which method achieved the highest correlation. The full benchmark comprised $12{,}600$ runs per centrality measure, spanning all combinations of node distribution, cap size, graph type, and graph parameters.
 
 \texttt{bosperrus} outperformed both the uncorrected scores and the SERN-based correction across the large majority of settings (\Cref{fig:sphere_correlations}). For Delaunay and $k$-NN graphs, \texttt{bosperrus}-corrected centralities achieved the highest correlation with $C_{global}$ in the majority of runs across all centrality measures. For radius graphs and degree centrality, uncorrected values marginally outperformed both correction methods in slightly more than half of runs, consistent with the observation that radius graphs do not introduce new local edges and therefore exhibit weaker and less systematic border artifacts. The SERN approach was consistently dominated by \texttt{bosperrus}, and showed signs of over-correction in several settings. Furthermore, computing 100 SERNs per sample represents a substantial computational overhead, as only the median is used for correction, leaving the variance of the ensemble unexploited.
 
@@ -170,39 +190,6 @@ We consider three proximity graph operators:
     \|u - v\| \le r.
     \]
 \end{itemize}
-
-\subsection*{\texttt{bosperrus} concept}
-
-\texttt{bosperrus} implements a modular pipeline for detecting, quantifying, and correcting border effects in spatial graphs.
-The central object is the \texttt{Flow} class, which accepts per-node border distances and centrality scores and exposes corrected centralities, per-measure model summaries, and the fitted model objects.
-To accommodate different levels of pre-processing, \texttt{Flow} provides four class-method constructors:
-\texttt{from\_coords} builds the proximity graph and computes border distances from raw node coordinates;
-\texttt{from\_coords\_and\_edgelist} accepts a pre-specified edge list and skips graph construction;
-\texttt{from\_coords\_and\_scores} operates on pre-computed centrality scores; and
-\texttt{from\_distances\_and\_scores} takes purely tabular input without requiring node coordinates, enabling integration with existing pipelines.
-
-When node coordinates are available, border distances $d_n$ are computed using one of four built-in functions:
-Euclidean distance to the convex hull of all node positions (\texttt{distance\_to\_convex\_hull});
-minimum Euclidean distance to any side of the axis-aligned bounding rectangle (\texttt{distance\_to\_rectangular\_border});
-nearest-neighbor distance to a user-supplied point set representing the border geometry (\texttt{distance\_to\_pointset}); or
-distance-transform distance to a binary mask (\texttt{distance\_to\_mask}).
-The choice is determined by the border geometry of the application at hand.
-
-For each centrality measure $C^{(m)}$, \texttt{bosperrus} fits the four parametric models described in the following subsection to the set of observed pairs $\{(d_n,\,C_n^{(m)})\}$, after excluding nodes with non-finite distances or scores.
-The three saturation models are fitted by nonlinear least squares using \texttt{scipy.optimize.curve\_fit}; for the piecewise linear model a subsequent \texttt{scipy.optimize.differential\_evolution} step refines the solution to reduce sensitivity to local minima.
-The constant fit serves as the null model representing the absence of any border effect.
-The best model is selected by the Akaike Information Criterion (AIC), computed as $\mathrm{AIC} = 2(k+1) - 2\ell$, where $k$ denotes the number of shape parameters, the additional $+1$ accounts for the residual variance $\widehat{\sigma}^2$ treated as an estimated parameter, and $\ell$ is the maximized log-likelihood (see Quality of fits below).
-If the constant fit achieves the lowest AIC, no correction is applied.
-
-When a saturation model is selected, \texttt{bosperrus} applies an additive correction that shifts each node's centrality to the plateau of the fitted model:
-\begin{equation}
-    \hat{C}_n = C_n + \underbrace{\bigl(C_{\text{plateau}} - \hat{C}_{\text{model}}(d_n)\bigr)}_{\Delta(d_n)},
-    \label{eq:correction}
-\end{equation}
-where $C_{\text{plateau}} = a + c$ for the exponential saturation and Michaelis-Menten models and $C_{\text{plateau}} = m \cdot b + c$ for the piecewise linear model.
-Nodes for which fitting failed fall back to the uncorrected value $\hat{C}_n = C_n$.
-Corrected centralities are stored in \texttt{flow.observations} alongside the original scores; per-measure fit statistics---including $R_{\mathrm{scaled}}$, $H_{\mathrm{AIC}}$, effect strength, and half-life---are accessible via \texttt{flow.fit\_quality}; and the fitted model objects are stored in \texttt{flow.best\_fits}.
-\texttt{bosperrus} is implemented in Python and is available on PyPI (\texttt{pip install bosperrus}).
 
 \subsection*{Models}
 \begin{itemize}
