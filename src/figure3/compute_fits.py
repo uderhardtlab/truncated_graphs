@@ -1,14 +1,14 @@
 """
-Figure 2 data pipeline: run BOSPERRUS fits on all MIBI-TOF datasets.
+Figure 3 data pipeline: run BOSPERRUS fits on all MIBI-TOF datasets.
 
 For each graph type, fits piecewise-linear / exponential-saturation /
 Michaelis-Menten curves of centrality vs. border distance and writes
-per-dataset fit-quality metrics to results/figure2/{graph_type}_graph_level_fits.csv.
+per-dataset fit-quality metrics to results/figure3/{graph_type}_graph_level_fits.csv.
 Results are cached; delete a CSV to force recomputation.
 
 Run:
     cd truncated_graphs/
-    uv run python src/fig2/compute_fits.py
+    uv run python src/figure3/compute_fits.py
 """
 import pickle
 import sys
@@ -31,7 +31,7 @@ GRAPH_TYPES = [
     "rnn_r=0.02", "rnn_r=0.03", "rnn_r=0.04", "rnn_r=0.05",
 ]
 COORDS_PICKLE = ROOT / "mibitof_coords" / "coords.pickle"
-RESULTS_DIR   = ROOT / "results" / "figure2"
+RESULTS_DIR   = ROOT / "results" / "figure3"
 
 
 def _graph_kwargs(graph_type):

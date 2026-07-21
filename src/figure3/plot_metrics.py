@@ -1,5 +1,5 @@
 """
-Figure 2 e-h: overview of border-effect metrics across measures and graph types.
+Figure 3 e-h: overview of border-effect metrics across measures and graph types.
 
 4 rows  (rel. likelihood | H_AIC | half-life | effect strength)
 5 cols  (betweenness | closeness | clustering | degree | pagerank)
@@ -11,7 +11,7 @@ Within each cell:
 
 Run:
     cd truncated_graphs/
-    uv run python src/fig2/plot_metrics.py
+    uv run python src/figure3/plot_metrics.py
 """
 import json
 from pathlib import Path
@@ -27,7 +27,7 @@ from matplotlib.lines import Line2D
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 
-with open(ROOT / "notebooks" / "fit_palette.json") as f:
+with open(ROOT / "fit_palette.json") as f:
     FIT_PAL = json.load(f)
 
 FIT_ORDER = ["Piecewise Linear Fit", "Exponential Saturation Fit", "Michaelis-Menten Fit"]
@@ -160,7 +160,7 @@ ax_leg.legend(fit_handles, [h.get_label() for h in fit_handles],
               handlelength=0.5, handletextpad=0.5, columnspacing=1.2)
 
 # ── save ──────────────────────────────────────────────────────────────────────
-out = ROOT / "result_plots" / "figure2_ef"
+out = ROOT / "result_plots" / "figure3" / "figure3_ef"
 fig.savefig(str(out) + ".svg", format="svg", bbox_inches="tight")
 fig.savefig(str(out) + ".pdf",              bbox_inches="tight")
 fig.savefig(str(out) + ".png", dpi=150,     bbox_inches="tight")

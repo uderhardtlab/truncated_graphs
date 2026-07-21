@@ -5,7 +5,7 @@ Computes (with CSV caching):
   - % new edges and MWU p-values for Delaunay graphs
   - % new edges, MWU and Fisher's exact p-values for kNN (k=5,10,15)
 
-Saves to result_plots/fig2/:
+Saves to result_plots/figure2/:
   fig2_delaunay_trunc_1.svg  — example crop + truncation edges
   fig2_delaunay_trunc_2.svg  — edge length violin for one dataset
   fig2_edge_effects.svg      — main 5-panel summary figure
@@ -26,16 +26,16 @@ from statsmodels.stats.multitest import multipletests
 from tqdm import tqdm
 
 ROOT = Path(__file__).resolve().parent.parent.parent
-sys.path.insert(0, str(ROOT / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # this dir: border_effects_kNN_del.py lives alongside this script
 
 plt.rcParams["svg.fonttype"] = "none"
 
 from border_effects_kNN_del import get_mibitof, get_squidpy_visium_datasets, trunc_graphs
 
 COORDS_PICKLE = ROOT / "mibitof_coords" / "coords.pickle"
-DEL_CSV       = ROOT / "results" / "figure1" / "del_trunc.csv"
-KNN_CSV       = ROOT / "results" / "figure1" / "kNN_trunc.csv"
-OUT_DIR       = ROOT / "result_plots" / "fig2"
+DEL_CSV       = ROOT / "results" / "figure2" / "del_trunc.csv"
+KNN_CSV       = ROOT / "results" / "figure2" / "kNN_trunc.csv"
+OUT_DIR       = ROOT / "result_plots" / "figure2"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 np.random.seed(41)

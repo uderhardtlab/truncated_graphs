@@ -11,9 +11,11 @@ import conntility
 import bosperrus
 
 # ── paths & constants ─────────────────────────────────────────────────────────
+# FN_MAT still points at a je30bery-only path that doesn't resolve on this
+# checkout — update once the actual connectome file's location here is known.
 FN_MAT     = "/data/bionets/je30bery/bosperrus-experiments/reimann_data/microns_mm3_connectome.h5"
-SAVE_PATH_SVG = "/data/bionets/je30bery/bosperrus-experiments/result_plots/fig3/fig_microns_buffer.svg"
-SAVE_PATH_PDF = "/data/bionets/je30bery/bosperrus-manuscript/figures/fig3_prelim_microns_buffer.pdf"
+SAVE_PATH_SVG = os.path.join(os.path.dirname(__file__), "..", "..", "result_plots", "figure4", "fig_microns_buffer.svg")
+SAVE_PATH_PDF = os.path.join(os.path.dirname(__file__), "..", "..", "..", "bosperrus", "figures", "figure4", "fig4_prelim_microns_buffer.pdf")
 
 REIMANN_THRESH = 0.05
 NBINS          = 51

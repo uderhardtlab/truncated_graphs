@@ -27,7 +27,7 @@ NUMBER_OF_SERNS = 100
 N_JOBS = 128
 N_OF_RUNS = 100
 
-OUTPUT_DIR = "../results/figure4"
+OUTPUT_DIR = "../results/figure5"
 
 
 def sample_uniform_on_unit_sphere(n, rng=None):
