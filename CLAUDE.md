@@ -29,7 +29,7 @@ truncated_graphs/
 └── TWOMBLI_data/                # TWOMBLI fiber network data
 ```
 
-The core dependency is the **bosperrus package** located at `/data/bionets/je30bery/bosperrus-package/` — a local dev install. Scripts reach it via `sys.path.append`. It is not on PyPI.
+The core dependency is the **bosperrus package**, published on PyPI and pulled in as a normal dependency via `uv` (see `pyproject.toml` / `uv.lock`). The sibling checkout lives at `/home/woody/iwbn/iwbn007h/bosperrus/bosperrus-package/`. Note: `src/border_effects_kNN_del.py` and `src/sern.py` still contain leftover `sys.path.append(...)` hacks pointing at a local checkout, predating the PyPI release — if you edit the package locally and want these two scripts to pick up the change, make sure that path actually resolves, since the PyPI-installed version and local source are not automatically kept in sync.
 
 ## bosperrus Package Architecture
 
@@ -54,13 +54,13 @@ After construction, call `flow.flow()` to run all fits, then read `flow.fit_qual
 Scripts are run from the `src/` directory (imports use relative `sys.path` additions):
 
 ```bash
-cd /data/bionets/je30bery/truncated_graphs/src
+cd /home/woody/iwbn/iwbn007h/bosperrus/truncated_graphs/src
 
 # Sphere benchmark (100 runs × 3 coord configs × 3 graph types; writes to ../results/figure4/)
-python sphere.py
+uv run python sphere.py
 
 # Figure 2 pipeline (reads mibitof_coords/coords.pickle; writes to ../results/figure2/)
-python figure_2.py
+uv run python figure_2.py
 ```
 
 Notebooks are run from the `notebooks/` directory. Results are cached to CSV in `results/` and re-read on subsequent runs to avoid recomputation.
@@ -92,7 +92,7 @@ Note: kNN edges are `(u, v)` tuples; Delaunay and rNN edges are `frozenset({u, v
 
 Core: `numpy`, `scipy`, `pandas`, `scikit-learn`, `networkx`, `squidpy`, `tifffile`, `joblib`, `tqdm`, `matplotlib`.
 
-Install bosperrus in editable mode if not already installed:
+`bosperrus` is a normal PyPI dependency here (see `pyproject.toml`), installed via `uv sync`. Only install it editable from the local checkout if you need to test unreleased package changes:
 ```bash
-pip install -e /data/bionets/je30bery/bosperrus-package/
+pip install -e /home/woody/iwbn/iwbn007h/bosperrus/bosperrus-package/
 ```
