@@ -109,10 +109,11 @@ def plot_fit_curve(ax, fit, d, color="tab:red"):
 
 
 def plot_counts_vs_distance(ax, result, measure="log1p_total_counts", color="gray",
-                             fit_color="tab:red", title=None,
+                             fit_color="tab:red", title=None, ylabel=None,
                              scatter_size=0.3, scatter_alpha=0.1, scatter_linewidths=0):
     """Scatter of counts vs. distance to the nearest tissue-border point,
-    with the fitted BOSPERRUS curve overlaid."""
+    with the fitted BOSPERRUS curve overlaid. `ylabel` defaults to `measure`;
+    pass "" to suppress it (e.g. for non-leftmost columns of a sharey row)."""
     flow = result["flow"]
     d = flow.observations["dist_to_tissue_border"]
     s = flow.observations[measure]
@@ -120,7 +121,7 @@ def plot_counts_vs_distance(ax, result, measure="log1p_total_counts", color="gra
                linewidths=scatter_linewidths, rasterized=True)
     plot_fit_curve(ax, flow.best_fits[measure], d, color=fit_color)
     ax.set_xlabel("distance to nearest tissue-border point (grid steps)")
-    ax.set_ylabel(measure)
+    ax.set_ylabel(measure if ylabel is None else ylabel)
     if title:
         ax.set_title(title)
 

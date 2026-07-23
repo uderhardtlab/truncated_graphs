@@ -77,12 +77,19 @@ def peel_sweep(array_row, array_col, counts_by_label, min_group_size=30):
 
 def plot_peel_sweep(ax, sweep_df, counts_labels, colors,
                      xlabel="peel iteration (topological layers from border)",
-                     ylabel=None, sig_threshold=0.05, sig_line_color="gray"):
+                     ylabel=None, sig_threshold=0.05, sig_line_color="gray",
+                     ylim_bottom=None):
     """Plot p-value vs. peel layer for each label in counts_labels, from a
     long-form sweep_df (columns: 'counts', 'layer', 'p_value') as returned by
     peel_sweep. Draws a dashed vertical line, in each label's own color, at
     the first peel layer where that label's p-value stops being significant
     (i.e. its BLADE-style buffer).
+
+    ylim_bottom clips the (log-scale) y-axis at this value — Welch t-tests on
+    large samples routinely produce p-values many orders of magnitude smaller
+    than sig_threshold, which otherwise stretch the axis and squash the
+    interesting region near sig_threshold. Points below it are simply out of
+    view, not removed from sweep_df.
     """
     for label in counts_labels:
         sub = sweep_df[sweep_df["counts"] == label]
@@ -96,6 +103,8 @@ def plot_peel_sweep(ax, sweep_df, counts_labels, colors,
             ax.axvline(buffer, color=colors[label], lw=1, ls="--", alpha=0.8)
     ax.axhline(sig_threshold, color=sig_line_color, ls="--", lw=1)
     ax.set_yscale("log")
+    if ylim_bottom is not None:
+        ax.set_ylim(bottom=ylim_bottom)
     ax.set_xlabel(xlabel)
     if ylabel:
         ax.set_ylabel(ylabel)
