@@ -8,8 +8,9 @@ Results are cached; delete a CSV to force recomputation.
 
 Run:
     cd truncated_graphs/
-    uv run python src/figure3/compute_fits.py
+    pixi run python src/figure3/compute_fits.py
 """
+import os
 import pickle
 import sys
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -43,9 +44,8 @@ def _graph_kwargs(graph_type):
 
 
 def fit_dataset(dataset, coordinates, graph_type):
-    coords = coordinates.copy()
-    lo, hi = coords.min(axis=0), coords.max(axis=0)
-    coords = (coords - lo) / (hi - lo)
+    lo, hi = coordinates.min(axis=0), coordinates.max(axis=0)
+    coords = (coordinates - lo) / (hi - lo)
     try:
         flow = Flow.from_coords(
             coordinates=coords,
@@ -71,7 +71,10 @@ def compute_fits(datasets, graph_type):
         return pd.read_csv(out_csv)
     print(f"computing fits: {graph_type} …")
     dfs = []
-    with ProcessPoolExecutor() as ex:
+    # ProcessPoolExecutor()'s default worker count is os.cpu_count(), which reports
+    # the node's total CPUs, not what SLURM actually allocated via --cpus-per-task
+    # (cgroup-restricted). len(os.sched_getaffinity(0)) respects the real allocation.
+    with ProcessPoolExecutor(max_workers=len(os.sched_getaffinity(0))) as ex:
         futures = {ex.submit(fit_dataset, ds, datasets[ds], graph_type): ds
                    for ds in datasets}
         for fut in tqdm(as_completed(futures), total=len(futures)):

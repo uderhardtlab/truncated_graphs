@@ -11,7 +11,7 @@ Within each cell:
 
 Run:
     cd truncated_graphs/
-    uv run python src/figure3/plot_metrics.py
+    pixi run python src/figure3/plot_metrics.py
 """
 import json
 from pathlib import Path
