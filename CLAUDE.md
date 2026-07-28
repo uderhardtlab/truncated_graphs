@@ -86,7 +86,7 @@ truncated_graphs/
 │                                     pipeline_figure.ipynb; needs manual provisioning)
 ```
 
-The core dependency is the **bosperrus package**, published on PyPI and pulled in as a normal dependency via `uv` (see `pyproject.toml` / `uv.lock`). The sibling checkout lives at `/home/woody/iwbn/iwbn007h/bosperrus/bosperrus-package/`. Note: `src/figure2/border_effects_kNN_del.py` and `src/figure5/sern.py` still contain leftover `sys.path.append(...)` hacks pointing at a local checkout, predating the PyPI release — if you edit the package locally and want these two scripts to pick up the change, make sure that path actually resolves, since the PyPI-installed version and local source are not automatically kept in sync. `sern.py`'s hack is a *relative* path (`../../bosperrus-package/`) resolved against whatever the process's cwd is at import time, not against the file's own location — it stays correct only because the documented run convention below keeps `cwd=src/` regardless of which `figureN/` subfolder actually holds the script being invoked.
+The core dependency is the **bosperrus package**, published on PyPI and pulled in as a normal dependency via `pixi` (see `pyproject.toml` / `pixi.lock`). The sibling checkout lives at `/home/woody/iwbn/iwbn007h/bosperrus/bosperrus-package/`. Note: `src/figure2/border_effects_kNN_del.py` and `src/figure5/sern.py` still contain leftover `sys.path.append(...)` hacks pointing at a local checkout, predating the PyPI release — if you edit the package locally and want these two scripts to pick up the change, make sure that path actually resolves, since the PyPI-installed version and local source are not automatically kept in sync. `sern.py`'s hack is a *relative* path (`../../bosperrus-package/`) resolved against whatever the process's cwd is at import time, not against the file's own location — it stays correct only because the documented run convention below keeps `cwd=src/` regardless of which `figureN/` subfolder actually holds the script being invoked.
 
 ## bosperrus Package Architecture
 
@@ -119,23 +119,25 @@ the working directory — every script's internal relative paths
 cd /home/woody/iwbn/iwbn007h/bosperrus/truncated_graphs/src
 
 # Figure 2 — edge truncation effects (Delaunay/kNN); writes ../results/figure2/, ../result_plots/figure2/
-uv run python figure2/edge_effects.py
+pixi run python figure2/edge_effects.py
 
 # Figure 3 data — AIC fits per MIBI-TOF dataset/graph type (reads mibitof_coords/coords.pickle,
 # which does not exist in this checkout yet); writes ../results/figure3/
-uv run python figure3/compute_fits.py
+pixi run python figure3/compute_fits.py
 
 # Figure 3 plot — reads ../results/figure3/ + ../fit_palette.json (from cwd=src/); writes ../result_plots/figure3/
-uv run python figure3/plot_metrics.py
+pixi run python figure3/plot_metrics.py
 
 # Figure 4 — MICrONS buffer identification (FN_MAT input path is still a stale,
 # nonexistent-here absolute path — see ../STORY.md Key Result #4)
-uv run python figure4/micron_comparison.py
+pixi run python figure4/micron_comparison.py
 
 # Figure 5 — sphere benchmark (100 runs × 3 coord configs × 3 graph types; writes
 # ../results/figure5/; NOT seeded — see ../STORY.md Key Result #1)
-uv run python figure5/sphere.py
+pixi run python figure5/sphere.py
 ```
+
+Run `pixi install` once (from `truncated_graphs/`) before the above — it resolves both the conda-forge dependencies (currently just `graph-tool`, which pip/`uv` couldn't provide) and the PyPI dependencies (`bosperrus`, `squidpy`, etc.) into one environment. `compute_centrality_measures` picks `graph-tool` automatically now that it's installed (see `bosperrus/centrality_measures.py`'s `backend=None` auto-detection) — no more silent fallback to the slower networkx backend.
 
 Notebooks are run from their own subdirectory under `notebooks/` (e.g.
 `notebooks/figure1/`), which is one level deeper than the old flat
@@ -176,9 +178,9 @@ All data-containing directories (`SNAP_data/`, `CD34_data/`, `TWOMBLI_data/`, `g
 
 ## Dependencies
 
-Core: `numpy`, `scipy`, `pandas`, `scikit-learn`, `networkx`, `squidpy`, `tifffile`, `joblib`, `tqdm`, `matplotlib`.
+Managed via `pixi` (see `pyproject.toml`'s `[tool.pixi.*]` tables and `pixi.lock`), not `uv` — this project mixes conda-forge dependencies (currently just `graph-tool`, which has no usable PyPI wheel) with regular PyPI dependencies (`bosperrus`, `squidpy`, `numpy`, `scipy`, `pandas`, `scikit-learn`, `networkx`, `tifffile`, `joblib`, `tqdm`, `matplotlib`, ...) in one resolved environment. `requires-python` is capped at `<3.13` — pixi otherwise resolves to the newest available Python satisfying `[project]`'s constraint, and the broader scientific stack (squidpy/scanpy/numba) isn't yet reliably compatible with very new Python versions.
 
-`bosperrus` is a normal PyPI dependency here (see `pyproject.toml`), installed via `uv sync`. Only install it editable from the local checkout if you need to test unreleased package changes:
+`bosperrus` is a normal PyPI dependency here. Only install it editable from the local checkout if you need to test unreleased package changes:
 ```bash
-pip install -e /home/woody/iwbn/iwbn007h/bosperrus/bosperrus-package/
+pixi run pip install -e /home/woody/iwbn/iwbn007h/bosperrus/bosperrus-package/
 ```
