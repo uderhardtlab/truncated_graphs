@@ -81,9 +81,9 @@ truncated_graphs/
 ├── mibitof_coords/, SNAP_data/, CD34_data/, TWOMBLI_data/, geo_data/, reimann_data/
 │                                   # raw/cached input data — all match .gitignore's
 │                                     `*data*` pattern except mibitof_coords/, which
-│                                     simply doesn't exist in this checkout at all
-│                                     (referenced by compute_fits.py and
-│                                     pipeline_figure.ipynb; needs manual provisioning)
+│                                     doesn't match that pattern but is provisioned here
+│                                     anyway (referenced by compute_fits.py and
+│                                     pipeline_figure.ipynb)
 ```
 
 The core dependency is the **bosperrus package**, published on PyPI and pulled in as a normal dependency via `uv` (see `pyproject.toml` / `uv.lock`). The sibling checkout lives at `/home/woody/iwbn/iwbn007h/bosperrus/bosperrus-package/`. Note: `src/figure2/border_effects_kNN_del.py` and `src/figure5/sern.py` still contain leftover `sys.path.append(...)` hacks pointing at a local checkout, predating the PyPI release — if you edit the package locally and want these two scripts to pick up the change, make sure that path actually resolves, since the PyPI-installed version and local source are not automatically kept in sync. `sern.py`'s hack is a *relative* path (`../../bosperrus-package/`) resolved against whatever the process's cwd is at import time, not against the file's own location — it stays correct only because the documented run convention below keeps `cwd=src/` regardless of which `figureN/` subfolder actually holds the script being invoked.
@@ -121,8 +121,9 @@ cd /home/woody/iwbn/iwbn007h/bosperrus/truncated_graphs/src
 # Figure 2 — edge truncation effects (Delaunay/kNN); writes ../results/figure2/, ../result_plots/figure2/
 uv run python figure2/edge_effects.py
 
-# Figure 3 data — AIC fits per MIBI-TOF dataset/graph type (reads mibitof_coords/coords.pickle,
-# which does not exist in this checkout yet); writes ../results/figure3/
+# Figure 3 data — AIC fits per MIBI-TOF dataset/graph type (reads
+# mibitof_coords/coords.pickle); writes ../results/figure3/. Caches per graph
+# type — delete a CSV under results/figure3/ to force recomputation.
 uv run python figure3/compute_fits.py
 
 # Figure 3 plot — reads ../results/figure3/ + ../fit_palette.json (from cwd=src/); writes ../result_plots/figure3/
@@ -166,13 +167,13 @@ Note: kNN edges are `(u, v)` tuples; Delaunay and rNN edges are `frozenset({u, v
 
 ## Data Sources
 
-- **MIBI-TOF**: Segmentation TIFFs → centroid extraction in `get_mibitof()`. Coordinate dicts expected at `mibitof_coords/coords.pickle` — **this directory does not exist in this checkout**; `compute_fits.py` and `pipeline_figure.ipynb` cannot run until it's provisioned.
+- **MIBI-TOF**: Segmentation TIFFs → centroid extraction in `get_mibitof()`. Coordinate dicts expected at `mibitof_coords/coords.pickle`, provisioned in this checkout; used by `compute_fits.py` and `pipeline_figure.ipynb`.
 - **Squidpy Visium**: 35 spatial transcriptomics datasets fetched via `sq.datasets.visium()` in `get_squidpy_visium_datasets()`.
 - **SNAP**: Geolocated check-in network (Brightkite); used for urban/social network comparison. Expected at `SNAP_data/` (gitignored via `.gitignore`'s `*data*` pattern — populate locally).
 - **MICrONS / Reimann connectome**: expected at `reimann_data/microns_mm3_connectome.h5`; `micron_comparison.py`'s `FN_MAT` still points at a stale, nonexistent `je30bery`-only absolute path (see `../STORY.md` Key Result #4).
 - **Blue Brain Project connectome**: expected at `reimann_data/connectome_BBP.h5`, read by the exploratory `edge_effect_in_BBP.ipynb`.
 
-All data-containing directories (`SNAP_data/`, `CD34_data/`, `TWOMBLI_data/`, `geo_data/`, `reimann_data/`) match `.gitignore`'s `*data*` pattern and must be populated per-checkout; `mibitof_coords/` is the one exception — it doesn't match that pattern but is nonetheless absent here.
+All data-containing directories (`SNAP_data/`, `CD34_data/`, `TWOMBLI_data/`, `geo_data/`, `reimann_data/`) match `.gitignore`'s `*data*` pattern and must be populated per-checkout; `mibitof_coords/` is the one exception — it doesn't match that pattern, and is provisioned in this checkout.
 
 ## Dependencies
 

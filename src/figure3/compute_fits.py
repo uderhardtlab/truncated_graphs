@@ -96,4 +96,10 @@ def main(graph_types=GRAPH_TYPES, coords_pickle=COORDS_PICKLE):
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--graph-type", choices=GRAPH_TYPES, default=None,
+                         help="Compute only this graph type (default: all, sequentially). "
+                              "Useful for parallelizing across a SLURM array, one task per type.")
+    args = parser.parse_args()
+    main(graph_types=[args.graph_type] if args.graph_type else GRAPH_TYPES)

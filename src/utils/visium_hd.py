@@ -22,6 +22,10 @@ from bosperrus.distances import distance_to_pointset
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from blade import peel_sweep
 
+def read_h5ad(h5ad_path):
+    adata = sc.read_h5ad(h5ad_path)
+    adata.obs["log1p_total_counts"] = np.log1p(np.asarray(adata.X.sum(axis=1)).ravel())
+    return adata
 
 def analyze_dataset(h5ad_path):
     """Load one Visium HD sample, restrict to its largest spatially-connected
@@ -31,9 +35,7 @@ def analyze_dataset(h5ad_path):
     needed for downstream plotting. The loaded AnnData is dropped before
     returning — these files are large (4-7GB), only small derived arrays are kept.
     """
-    adata = sc.read_h5ad(h5ad_path)
-    adata.obs["log1p_total_counts"] = np.log1p(np.asarray(adata.X.sum(axis=1)).ravel())
-
+    adata = read_h5ad(h5ad_path)
     # tissue-border points: grid spots with fewer than 4 grid-neighbors
     # (von Neumann/4-connectivity, radius = 1 grid step)
     squidpy.gr.spatial_neighbors_grid(adata, n_rings=1, n_neighs=4)
@@ -128,7 +130,7 @@ def plot_counts_vs_distance(ax, result, measure="log1p_total_counts", color="gra
 
 def plot_decision_boundary(ax, result, measure="log1p_total_counts", cmap="viridis",
                             boundary_color="tab:red", boundary_alpha=0.5, title=None,
-                            add_legend=False):
+                            add_legend=False, vmin=0, vmax=6):
     """Grid-space scatter colored by counts, with the tissue-border elbow
     drawn as an exclusion boundary (bins within the elbow distance are
     highlighted directly)."""
@@ -137,7 +139,7 @@ def plot_decision_boundary(ax, result, measure="log1p_total_counts", cmap="virid
     counts = result["log1p_total_counts"]
 
     ax.scatter(result["array_col"], result["array_row"], c=counts, cmap=cmap,
-               s=0.5, alpha=0.3, rasterized=True)
+               s=0.5, alpha=0.3, rasterized=True, vmin=vmin, vmax=vmax)
 
     fit = flow.best_fits[measure]
     if isinstance(fit, PiecewiseLinearFit):

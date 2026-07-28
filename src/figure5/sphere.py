@@ -24,7 +24,7 @@ import os
 os.environ["OMP_NUM_THREADS"] = "8"
 
 NUMBER_OF_SERNS = 100
-N_JOBS = 128
+N_JOBS = -1  # joblib: use all available cores on whatever machine this runs on
 N_OF_RUNS = 100
 
 OUTPUT_DIR = "../results/figure5"

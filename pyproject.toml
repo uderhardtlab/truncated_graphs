@@ -11,6 +11,7 @@ dependencies = [
     "descartes>=1.1.0",
     "jupyterlab>=4.6.1",
     "matplotlib>=3.11.0",
+    "scanpy[leiden]>=1.11.5",
     "scipy>=1.17.1",
     "seaborn>=0.13.2",
     "squidpy>=1.8.2",
