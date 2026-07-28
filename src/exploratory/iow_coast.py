@@ -46,7 +46,7 @@ print(f"nodes: {len(common)}, dist range: {dist_series.min():.0f}–{dist_series
 
 # 6. BOSPERRUS
 flow = bosperrus.Flow.from_distances_and_scores(distances=dist_series, scores=scores_df)
-flow.flow(measures=["degree"])
+flow.flow(score_names=["degree"])
 fq = flow.fit_quality["degree"]
 print(flow.fit_quality)
 

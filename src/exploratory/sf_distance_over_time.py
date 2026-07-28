@@ -73,7 +73,7 @@ for t in quarters:
         distances=dist,
         scores=pd.DataFrame({"degree": degree}),
     )
-    flow.flow(measures=["degree"])
+    flow.flow(score_names=["degree"])
 
     fq       = flow.fit_quality["degree"]
     rel_ll   = fq["scaled_relative_likelihood_over_baseline"]

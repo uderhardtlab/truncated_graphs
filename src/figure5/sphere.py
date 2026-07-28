@@ -93,7 +93,7 @@ def get_bosperrus_corrections(crop_coords, edges, measures, distances):
         distances=distances.reset_index(drop=True),
         scores=scores,
     )
-    bf.flow(measures=list(measures))
+    bf.flow(score_names=list(measures))
     bf.observations["degree"] = bf.observations["degree"].astype(int)
     return bf.observations
 
@@ -149,6 +149,9 @@ def process_coords(coords, edge_type, cap_radii, k=None, r=None):
         )
 
         # --- correlations ---
+        # TODO: check whether Spearman rank correlation should be used instead of
+        # Pearson — Rheinwalt et al. 2012 validate SERN correction via Spearman's
+        # rank correlation coefficient, not Pearson.
         corrs_original_crop, corrs_original_corrected = [], []
         corrs_original_sern, corrs_crop_sern = [], []
 
