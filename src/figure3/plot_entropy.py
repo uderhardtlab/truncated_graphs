@@ -25,7 +25,7 @@ matplotlib.rcParams["svg.fonttype"] = "none"  # keep SVG text as editable <text>
 import matplotlib.pyplot as plt
 import numpy as np
 
-from plot_metrics import REPRESENTATIVE, FAMILIES, MEASURES, load_data, kde_or_none
+from plot_metrics import REPRESENTATIVE, FAMILIES, MEASURES, load_data, kde_or_none, set_three_ticks
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -51,6 +51,7 @@ def plot_cell(ax, sub, fit_palette):
     ax.set_ylim(bottom=0)
     ax.spines[["top", "right"]].set_visible(False)
     ax.tick_params(labelsize=6)
+    set_three_ticks(ax)
 
 
 def plot_entropy(data, fit_palette):

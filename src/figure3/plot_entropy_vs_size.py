@@ -30,7 +30,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from plot_metrics import REPRESENTATIVE, FAMILIES, MEASURES, load_data
+from plot_metrics import REPRESENTATIVE, FAMILIES, MEASURES, load_data, set_three_ticks
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -56,6 +56,7 @@ def plot_cell(ax, sub):
     ax.set_ylim(-0.03, 1.03)
     ax.spines[["top", "right"]].set_visible(False)
     ax.tick_params(labelsize=7)
+    set_three_ticks(ax)
 
 
 def plot_entropy_vs_size(data):

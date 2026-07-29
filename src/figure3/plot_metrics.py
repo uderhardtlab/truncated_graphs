@@ -96,6 +96,19 @@ def load_data():
     return combined[combined["measure"].isin(MEASURES)].copy()
 
 
+def set_three_ticks(ax):
+    """Exactly 3 evenly-spaced, labeled ticks per axis (min/mid/max of the
+    current view limits) -- call after xlim/ylim are finalized."""
+    for set_ticks, set_labels, get_lim in (
+        (ax.set_xticks, ax.set_xticklabels, ax.get_xlim),
+        (ax.set_yticks, ax.set_yticklabels, ax.get_ylim),
+    ):
+        lo, hi = get_lim()
+        ticks = np.linspace(lo, hi, 3)
+        set_ticks(ticks)
+        set_labels([f"{t:.2g}" for t in ticks])
+
+
 def kde_or_none(values, grid):
     """gaussian_kde requires >1 distinct value; returns None for degenerate
     (too few, or zero-variance) inputs rather than raising."""
@@ -173,6 +186,7 @@ def plot_cell(ax_main, ax_top, ax_right, sub, fit_palette):
     ax_main.set_ylim(-y_abs_max, y_abs_max)
     ax_main.spines[["top", "right"]].set_visible(False)
     ax_main.tick_params(labelsize=6)
+    set_three_ticks(ax_main)
     for ax in (ax_top, ax_right):
         ax.axis("off")
 
