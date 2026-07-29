@@ -214,9 +214,7 @@ def main():
 
     out = ROOT / "result_plots" / "figure3" / "figure3"
     fig.savefig(str(out) + ".svg", format="svg", bbox_inches="tight")
-    fig.savefig(str(out) + ".pdf", bbox_inches="tight")
-    fig.savefig(str(out) + ".png", dpi=160, bbox_inches="tight")
-    print(f"Saved {out}.svg / .pdf / .png")
+    print(f"Saved {out}.svg")
     plt.close("all")
 
 
