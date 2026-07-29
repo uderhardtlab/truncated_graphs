@@ -38,6 +38,7 @@ from pathlib import Path
 
 import matplotlib
 matplotlib.use("Agg")
+matplotlib.rcParams["svg.fonttype"] = "none"  # keep SVG text as editable <text>, not outlined paths
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
