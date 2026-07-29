@@ -1,13 +1,32 @@
 """
-Figure 3 e-h: overview of border-effect metrics across measures and graph types.
+Figure 3: border-effect fit summary across measures, for one representative
+graph type per family (Delaunay, kNN k=10, rNN r=0.03 -- the graph types
+within a family are similar enough that showing all 8 was redundant).
 
-4 rows  (rel. likelihood | H_AIC | half-life | effect strength)
-5 cols  (betweenness | closeness | clustering | degree | pagerank)
+Each (family, measure) cell is a mini "jointplot":
+  - main panel: every non-Constant dataset's fitted curve. y is anchored to
+    observed_effect_strength (not min-max normalized), so y(0) at the
+    border equals observed_effect_strength exactly and y(d_max) at the
+    interior is always 0 -- sign and magnitude are both real, comparable
+    quantities, not an artifact of rescaling. Constant Fit rows are flat
+    lines at y=0 by definition and aren't drawn here (indistinguishable
+    from the zero-reference line already shown).
+  - top margin: distribution of observed_half_life, split by winning fit
+    type (including Constant Fit, as a spike -- see below).
+  - right margin: same idea for observed_effect_strength.
 
-Within each cell:
-  - strip points colored by best-fit model type
-  - box plots: black outline, no fill, drawn on top
-  - shared y-axis per row
+Every marginal curve/spike is scaled by that fit type's share of the
+cell's total dataset count (not a bare gaussian_kde, which always
+integrates to 1 regardless of sample size) -- so relative area under each
+curve directly reads as "how often did this fit type win," including
+Constant Fit (no border effect detected). Constant Fit's half_life and
+effect_strength are identically 0 for every such row (no spread, so no
+real KDE is possible) and are drawn as a narrow spike at 0 instead, with
+the same area-equals-share convention.
+
+y-axis is not shared/fixed across panels -- each cell auto-scales
+symmetrically around 0 to its own data range, since different measures
+have very different natural effect magnitudes.
 
 Run:
     cd truncated_graphs/
@@ -19,151 +38,173 @@ from pathlib import Path
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import matplotlib.ticker as mticker
 import numpy as np
 import pandas as pd
+from matplotlib.collections import LineCollection
+from matplotlib.colors import to_rgba
 from matplotlib.gridspec import GridSpec
 from matplotlib.lines import Line2D
+from scipy.stats import gaussian_kde, norm
 
+from bosperrus.fit import PiecewiseLinearFit, ExponentialSaturationFit, MichaelisMentenFit
 from compute_fits import MEASURES as _MEASURES
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 
-FIT_ORDER = ["Piecewise Linear Fit", "Exponential Saturation Fit", "Michaelis-Menten Fit"]
-GT_SHORT  = {"delaunay": "Del.", "knn_k=10": "kNN", "rnn_r=0.03": "rNN"}
-GT_ORDER  = ["delaunay", "knn_k=10", "rnn_r=0.03"]
-MEASURES  = sorted(_MEASURES)
+MEASURES = sorted(_MEASURES)
 
-METRICS = [
-    # (column,                                    ylabel,                hline0, hlines_dashed)
-    ("scaled_relative_likelihood_over_baseline", "rel. likelihood",     None,   [1.1]),
-    ("entropy_AIC_weights",                       r"$H_\mathrm{AIC}$", None,   []),
-    ("observed_half_life",                         "half-life",         None,   []),
-    ("observed_effect_strength",                   "effect strength",    0.0,   [-0.1, 0.1]),
-]
+REPRESENTATIVE = {"Delaunay": "delaunay", "kNN (k=10)": "knn_k=10", "rNN (r=0.03)": "rnn_r=0.03"}
+FAMILIES = list(REPRESENTATIVE.keys())
 
-TICK_FS  = 8.0
-LABEL_FS = 9.5
-TITLE_FS = 10.0
+CURVE_FIT_ORDER = ["Piecewise Linear Fit", "Exponential Saturation Fit", "Michaelis-Menten Fit"]
+ALL_FIT_ORDER = CURVE_FIT_ORDER + ["Constant Fit"]
 
-CELL_H  = 1.10
-LEG_H   = 0.55
-TOTAL_W = 7.5
+# coordinates are min-max normalized to the unit square before
+# distance_to_convex_hull, so d_max is consistent across datasets (measured
+# 0.483 +/- 0.017 over an 80-dataset random sample) -- used as a shared
+# stand-in for each dataset's own d_max, since it isn't stored in the
+# per-graph-type CSVs.
+D_MAX_APPROX = 0.483
+_EPS = 1e-10
+# narrow gaussian standing in for Constant Fit's zero-variance spike, as a
+# fraction of each margin's own range
+SPIKE_SIGMA_FRAC = 0.02
+
+CURVE_FN = {
+    "Piecewise Linear Fit": lambda d, r: PiecewiseLinearFit.piecewise_plateau(d, r["piecewise_linear_b"], r["piecewise_linear_m"], r["piecewise_linear_c"]),
+    "Exponential Saturation Fit": lambda d, r: ExponentialSaturationFit.exp_sat(d, r["exponential_saturation_a"], r["exponential_saturation_b"], r["exponential_saturation_c"]),
+    "Michaelis-Menten Fit": lambda d, r: MichaelisMentenFit.michaelis_menten(d, r["michaelis_menten_a"], r["michaelis_menten_b"], r["michaelis_menten_c"]),
+}
+
+X_GRID = np.linspace(0, D_MAX_APPROX, 60)
+HALFLIFE_GRID = np.linspace(0, D_MAX_APPROX, 100)
+LINE_ALPHA = 0.035
 
 
 def load_data():
     """Read the per-graph-type fit_quality CSVs written by compute_fits.py for
-    the graph types in GT_ORDER, restricted to MEASURES, excluding rows where
-    ConstantFit (no border effect) won."""
+    the representative graph types, restricted to MEASURES. Includes Constant
+    Fit rows (unlike earlier revisions) -- they're needed to compute each fit
+    type's true share of the cell's datasets."""
     dfs = []
-    for gt in GT_ORDER:
+    for gt in REPRESENTATIVE.values():
         df = pd.read_csv(ROOT / "results" / "figure3" / f"{gt}_graph_level_fits.csv", index_col=0)
         df["graph_type"] = gt
-        df["measure"]    = df.index
+        df["measure"] = df.index
         dfs.append(df)
     combined = pd.concat(dfs).reset_index(drop=True)
-    combined = combined[combined["measure"].isin(MEASURES)].copy()
-    return combined[combined["best_fit_type"] != "Constant Fit"].copy()
+    return combined[combined["measure"].isin(MEASURES)].copy()
+
+
+def kde_or_none(values, grid):
+    """gaussian_kde requires >1 distinct value; returns None for degenerate
+    (too few, or zero-variance) inputs rather than raising."""
+    values = np.asarray(values)
+    values = values[np.isfinite(values)]
+    if len(values) < 5 or values.std() < 1e-8:
+        return None
+    return gaussian_kde(values)(grid)
+
+
+def plot_cell(ax_main, ax_top, ax_right, sub, fit_palette):
+    n_total = len(sub)
+    non_baseline = sub[sub["best_fit_type"] != "Constant Fit"]
+
+    segments_by_model = {m: [] for m in CURVE_FIT_ORDER}
+    for _, row in non_baseline.iterrows():
+        model = row["best_fit_type"]
+        S = CURVE_FN[model](X_GRID, row)
+        c_border, c_center = S[0], S[-1]
+        shape = (S - c_center) / (c_border - c_center + _EPS)
+        segments_by_model[model].append(np.column_stack([X_GRID, shape * row["observed_effect_strength"]]))
+
+    y_abs_max = non_baseline["observed_effect_strength"].abs().max() if len(non_baseline) else 0.05
+    y_abs_max = max(y_abs_max, 0.05) * 1.15
+    es_grid = np.linspace(-y_abs_max, y_abs_max, 100)
+    spike_sigma_x = SPIKE_SIGMA_FRAC * D_MAX_APPROX
+    spike_sigma_y = SPIKE_SIGMA_FRAC * y_abs_max
+
+    for model in CURVE_FIT_ORDER:
+        segs = segments_by_model[model]
+        if segs:
+            color = to_rgba(fit_palette[model], alpha=LINE_ALPHA)
+            lc = LineCollection(segs, colors=[color] * len(segs), linewidths=0.8)
+            lc.set_rasterized(True)  # thousands of paths per panel -- keep vector output size sane
+            ax_main.add_collection(lc)
+
+        model_rows = sub[sub["best_fit_type"] == model]
+        frac = len(model_rows) / n_total if n_total else 0
+        if frac == 0:
+            continue
+
+        hl_density = kde_or_none(model_rows["observed_half_life"] * D_MAX_APPROX, HALFLIFE_GRID)
+        if hl_density is not None:
+            hl_density = hl_density * frac
+            ax_top.fill_between(HALFLIFE_GRID, hl_density, color=fit_palette[model], alpha=0.35, lw=0)
+            ax_top.plot(HALFLIFE_GRID, hl_density, color=fit_palette[model], lw=1)
+
+        es_density = kde_or_none(model_rows["observed_effect_strength"], es_grid)
+        if es_density is not None:
+            es_density = es_density * frac
+            ax_right.fill_betweenx(es_grid, es_density, color=fit_palette[model], alpha=0.35, lw=0)
+            ax_right.plot(es_density, es_grid, color=fit_palette[model], lw=1)
+
+    # Constant Fit: half_life and effect_strength are identically 0 (no spread
+    # -> no real KDE possible), represented as a narrow spike whose area still
+    # equals its share.
+    n_const = (sub["best_fit_type"] == "Constant Fit").sum()
+    frac_const = n_const / n_total if n_total else 0
+    if frac_const > 0:
+        spike_x = frac_const * norm(0, spike_sigma_x).pdf(HALFLIFE_GRID)
+        ax_top.fill_between(HALFLIFE_GRID, spike_x, color=fit_palette["Constant Fit"], alpha=0.5, lw=0)
+        ax_top.plot(HALFLIFE_GRID, spike_x, color=fit_palette["Constant Fit"], lw=1)
+
+        spike_y = frac_const * norm(0, spike_sigma_y).pdf(es_grid)
+        ax_right.fill_betweenx(es_grid, spike_y, color=fit_palette["Constant Fit"], alpha=0.5, lw=0)
+        ax_right.plot(spike_y, es_grid, color=fit_palette["Constant Fit"], lw=1)
+
+    ax_main.axhline(0, color="#898781", lw=0.7, zorder=0)
+    ax_main.set_xlim(0, D_MAX_APPROX)
+    ax_main.set_ylim(-y_abs_max, y_abs_max)
+    ax_main.spines[["top", "right"]].set_visible(False)
+    ax_main.tick_params(labelsize=6)
+    for ax in (ax_top, ax_right):
+        ax.axis("off")
 
 
 def plot_metrics(data, fit_palette):
-    n_rows, n_cols = len(METRICS), len(MEASURES)
-    total_h = n_rows * CELL_H + LEG_H
+    n_rows, n_cols = len(FAMILIES), len(MEASURES)
+    fig = plt.figure(figsize=(9, 9))
+    gs = GridSpec(n_rows * 2, n_cols * 2, figure=fig,
+                  height_ratios=[0.7, 3.2] * n_rows, width_ratios=[3.2, 0.7] * n_cols,
+                  hspace=0.08, wspace=0.08)
 
-    fig = plt.figure(figsize=(TOTAL_W, total_h), facecolor="white")
-    gs  = GridSpec(
-        n_rows, n_cols,
-        figure=fig,
-        left=0.12, right=0.98,
-        top=1.0 - LEG_H / total_h - 0.01,
-        bottom=0.08,
-        hspace=0.40, wspace=0.18,
-    )
+    for ri, family in enumerate(FAMILIES):
+        gt = REPRESENTATIVE[family]
+        for ci, measure in enumerate(MEASURES):
+            ax_main = fig.add_subplot(gs[ri * 2 + 1, ci * 2])
+            ax_top = fig.add_subplot(gs[ri * 2, ci * 2], sharex=ax_main)
+            ax_right = fig.add_subplot(gs[ri * 2 + 1, ci * 2 + 1], sharey=ax_main)
 
-    rng = np.random.default_rng(42)
+            sub = data[(data["measure"] == measure) & (data["graph_type"] == gt)]
+            plot_cell(ax_main, ax_top, ax_right, sub, fit_palette)
 
-    # 1–99th percentile clip per row (across all measures, for a consistent shared axis)
-    row_clips = {}
-    for ri, (ycol, *_) in enumerate(METRICS):
-        sub = data[ycol].dropna()
-        row_clips[ri] = (sub.quantile(0.01), sub.quantile(0.99))
-
-    row_axes = {}
-
-    for ri, (ycol, ylabel, hline0, hlines) in enumerate(METRICS):
-        lo, hi = row_clips[ri]
-
-        for ci, m in enumerate(MEASURES):
-            sharey_ax = row_axes.get(ri)
-            ax = fig.add_subplot(gs[ri, ci], sharey=sharey_ax)
-            if sharey_ax is None:
-                row_axes[ri] = ax
-
-            sub = data[(data["measure"] == m) & data[ycol].between(lo, hi)]
-
-            # strip: colored by best-fit model, drawn first (background)
-            for i, gt in enumerate(GT_ORDER):
-                gt_sub = sub[sub["graph_type"] == gt]
-                for ft in FIT_ORDER:
-                    vals = gt_sub[gt_sub["best_fit_type"] == ft][ycol].dropna().values
-                    if not len(vals):
-                        continue
-                    jx = i + rng.uniform(-0.18, 0.18, len(vals))
-                    ax.scatter(jx, vals, s=1.5, c=fit_palette[ft], alpha=0.35,
-                               linewidths=0, zorder=2, rasterized=True)
-
-            # box: black outline, no fill, on top
-            for i, gt in enumerate(GT_ORDER):
-                vals = sub[sub["graph_type"] == gt][ycol].dropna().values
-                if not len(vals):
-                    continue
-                ax.boxplot(
-                    vals, positions=[i], widths=0.32,
-                    patch_artist=True, zorder=4, showfliers=False,
-                    boxprops    =dict(facecolor="none", edgecolor="black", linewidth=0.8),
-                    medianprops =dict(color="black", linewidth=1.8),
-                    whiskerprops=dict(color="black", linewidth=0.8),
-                    capprops    =dict(color="black", linewidth=0.8),
-                )
-
-            if hline0 is not None:
-                ax.axhline(hline0, lw=0.9, color="#444444", zorder=1)
-            for h in hlines:
-                ax.axhline(h, lw=0.8, ls="--", color="#aaaaaa", zorder=1)
-
-            ax.set_xlim(-0.5, len(GT_ORDER) - 0.5)
-            ax.set_xticks(range(len(GT_ORDER)))
-            ax.set_xticklabels(
-                [GT_SHORT[gt] for gt in GT_ORDER] if ri == n_rows - 1 else [""] * 3,
-                fontsize=TICK_FS,
-            )
-            ax.tick_params(labelsize=TICK_FS, length=3, pad=2, width=0.6)
-            ax.spines[["top", "right"]].set_visible(False)
-            ax.spines[["left", "bottom"]].set_linewidth(0.6)
-            ax.yaxis.set_major_locator(mticker.MaxNLocator(4, prune="both"))
-
-            if ci > 0:
-                plt.setp(ax.get_yticklabels(), visible=False)
-            if ci == 0:
-                ax.set_ylabel(ylabel, fontsize=LABEL_FS, labelpad=3)
             if ri == 0:
-                ax.set_title(m, fontsize=TITLE_FS, pad=4)
+                ax_top.set_title(measure, fontsize=9, pad=4)
+            if ci == 0:
+                ax_main.set_ylabel(family, fontsize=8, labelpad=4)
+            if ri == n_rows - 1:
+                ax_main.set_xlabel("distance to border", fontsize=6.5)
+            else:
+                plt.setp(ax_main.get_xticklabels(), visible=False)
 
-    # ── legend (top center, circles, fit model only) ──────────────────────────
-    fit_handles = [
-        Line2D([0], [0], marker="o", color="none",
-               markerfacecolor=fit_palette[ft], markeredgewidth=0,
-               markersize=7, label=ft)
-        for ft in FIT_ORDER
-    ]
-    ax_leg = fig.add_axes([0, 1.0 - LEG_H / total_h, 1, LEG_H / total_h])
-    ax_leg.axis("off")
-    ax_leg.legend(fit_handles, [h.get_label() for h in fit_handles],
-                  loc="center", ncol=3,
-                  fontsize=8.5, frameon=False,
-                  title="Best-fit model", title_fontsize=9,
-                  handlelength=0.5, handletextpad=0.5, columnspacing=1.2)
-    return fig, total_h
+    handles = [Line2D([0], [0], color=fit_palette[m], lw=2.5, label=m) for m in ALL_FIT_ORDER]
+    fig.legend(handles=handles, loc="upper center", ncol=2, fontsize=8.5, frameon=False, bbox_to_anchor=(0.5, 1.05))
+    fig.suptitle("Border-effect fits by measure and graph type\n"
+                 "(top margin: half-life distribution; right margin: effect-strength distribution; "
+                 "area under each curve/spike = share of datasets won)",
+                 fontsize=9.5, y=1.1)
+    return fig
 
 
 def main():
@@ -171,13 +212,13 @@ def main():
         fit_palette = json.load(f)
 
     data = load_data()
-    fig, total_h = plot_metrics(data, fit_palette)
+    fig = plot_metrics(data, fit_palette)
 
-    out = ROOT / "result_plots" / "figure3" / "figure3_ef"
+    out = ROOT / "result_plots" / "figure3" / "figure3"
     fig.savefig(str(out) + ".svg", format="svg", bbox_inches="tight")
-    fig.savefig(str(out) + ".pdf",              bbox_inches="tight")
-    fig.savefig(str(out) + ".png", dpi=150,     bbox_inches="tight")
-    print(f"Saved {out}.svg / .pdf / .png  ({TOTAL_W:.1f} × {total_h:.1f} in)")
+    fig.savefig(str(out) + ".pdf", bbox_inches="tight")
+    fig.savefig(str(out) + ".png", dpi=160, bbox_inches="tight")
+    print(f"Saved {out}.svg / .pdf / .png")
     plt.close("all")
 
 
