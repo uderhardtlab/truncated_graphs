@@ -25,8 +25,9 @@ real KDE is possible) and are drawn as a narrow spike at 0 instead, with
 the same area-equals-share convention.
 
 y-axis is not shared/fixed across panels -- each cell auto-scales
-symmetrically around 0 to its own data range, since different measures
-have very different natural effect magnitudes.
+symmetrically around 0 to its own 97th-percentile |effect_strength| (not the
+true max, which a handful of sign-crossing outliers could otherwise inflate),
+since different measures have very different natural effect magnitudes.
 
 Run:
     cd truncated_graphs/
@@ -43,7 +44,6 @@ import pandas as pd
 from matplotlib.collections import LineCollection
 from matplotlib.colors import to_rgba
 from matplotlib.gridspec import GridSpec
-from matplotlib.lines import Line2D
 from scipy.stats import gaussian_kde, norm
 
 from bosperrus.fit import PiecewiseLinearFit, ExponentialSaturationFit, MichaelisMentenFit
@@ -57,7 +57,6 @@ REPRESENTATIVE = {"Delaunay": "delaunay", "kNN (k=10)": "knn_k=10", "rNN (r=0.03
 FAMILIES = list(REPRESENTATIVE.keys())
 
 CURVE_FIT_ORDER = ["Piecewise Linear Fit", "Exponential Saturation Fit", "Michaelis-Menten Fit"]
-ALL_FIT_ORDER = CURVE_FIT_ORDER + ["Constant Fit"]
 
 # coordinates are min-max normalized to the unit square before
 # distance_to_convex_hull, so d_max is consistent across datasets (measured
@@ -118,8 +117,13 @@ def plot_cell(ax_main, ax_top, ax_right, sub, fit_palette):
         shape = (S - c_center) / (c_border - c_center + _EPS)
         segments_by_model[model].append(np.column_stack([X_GRID, shape * row["observed_effect_strength"]]))
 
-    y_abs_max = non_baseline["observed_effect_strength"].abs().max() if len(non_baseline) else 0.05
-    y_abs_max = max(y_abs_max, 0.05) * 1.15
+    # 97th percentile rather than the true max: observed_effect_strength is only
+    # bounded to [-1, 1] when the border and center values share a sign -- a
+    # curve that crosses zero between them can spike much further out, and a
+    # handful of such outliers would otherwise dictate the whole axis, squeezing
+    # everything else into a fraction of the panel.
+    y_abs_max = np.percentile(non_baseline["observed_effect_strength"].abs(), 97) if len(non_baseline) else 0.05
+    y_abs_max = max(y_abs_max, 0.05) * 1.1
     es_grid = np.linspace(-y_abs_max, y_abs_max, 100)
     spike_sigma_x = SPIKE_SIGMA_FRAC * D_MAX_APPROX
     spike_sigma_y = SPIKE_SIGMA_FRAC * y_abs_max
@@ -174,7 +178,7 @@ def plot_cell(ax_main, ax_top, ax_right, sub, fit_palette):
 
 def plot_metrics(data, fit_palette):
     n_rows, n_cols = len(FAMILIES), len(MEASURES)
-    fig = plt.figure(figsize=(9, 9))
+    fig = plt.figure(figsize=(9, 6))
     gs = GridSpec(n_rows * 2, n_cols * 2, figure=fig,
                   height_ratios=[0.7, 3.2] * n_rows, width_ratios=[3.2, 0.7] * n_cols,
                   hspace=0.08, wspace=0.08)
@@ -198,12 +202,6 @@ def plot_metrics(data, fit_palette):
             else:
                 plt.setp(ax_main.get_xticklabels(), visible=False)
 
-    handles = [Line2D([0], [0], color=fit_palette[m], lw=2.5, label=m) for m in ALL_FIT_ORDER]
-    fig.legend(handles=handles, loc="upper center", ncol=2, fontsize=8.5, frameon=False, bbox_to_anchor=(0.5, 1.05))
-    fig.suptitle("Border-effect fits by measure and graph type\n"
-                 "(top margin: half-life distribution; right margin: effect-strength distribution; "
-                 "area under each curve/spike = share of datasets won)",
-                 fontsize=9.5, y=1.1)
     return fig
 
 
