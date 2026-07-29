@@ -6,3 +6,7 @@
 # pixi environments
 .pixi/*
 !.pixi/config.toml
+
+# slurm job logs
+jobs/logs/*
+!jobs/logs/.gitkeep

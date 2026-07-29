@@ -293,7 +293,7 @@ for country in ["England", "Scotland", "Wales"]:
                 distances=dist,
                 scores=scores_sub,
             )
-            flow.flow(measures=MEASURES)
+            flow.flow(score_names=MEASURES)
             fq = flow.fit_quality   # rows = param names, cols = measures
 
             for m in MEASURES:
@@ -395,7 +395,7 @@ if counties_gdf is not None and len(counties_gdf) > 0:
                         distances=dist,
                         scores=scores_sub,
                     )
-                    flow.flow(measures=MEASURES)
+                    flow.flow(score_names=MEASURES)
                     fq = flow.fit_quality
 
                     for m in MEASURES:
