@@ -88,6 +88,13 @@ def main(graph_types=GRAPH_TYPES, coords_pickle=COORDS_PICKLE):
     with open(coords_pickle, "rb") as f:
         datasets = pickle.load(f)
     datasets.pop("glioma_mibitof:CHOP_907_R1C6_whole_cell.tiff", None)
+    # mibitof_coords/coords.pickle also carries 35 squidpy Visium demo samples
+    # (sq_visium:*) despite the name -- Visium spots sit on a regular grid,
+    # unlike organic MIBI-TOF cell centroids, and measurably skew border-effect
+    # sign/direction on sparse graphs (see figure3 investigation). Visium gets
+    # its own dedicated treatment elsewhere; exclude it here for a clean
+    # MIBI-TOF-only figure3.
+    datasets = {k: v for k, v in datasets.items() if not k.startswith("sq_visium:")}
 
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     frames = []
