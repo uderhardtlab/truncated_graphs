@@ -1,0 +1,6 @@
+ WARN cache for Repodata at /home/hpc/iwbn/iwbn007h/.cache/rattler/cache/repodata is on a network/parallel filesystem (NFS/SMB/FUSE/BeeGFS/Lustre/GPFS/CephFS), redirected to /tmp/pixi-cache-iwbn007h/repodata for this run. Set [cache.repodata] in config.toml or PIXI_CACHE_DIR to override, or [cache.netfs-redirect] = "never" to keep the original path.
+[A02994C6] loading + analyzing (stomics_custom, 10.0um, loader=stomics)...
+[34mINFO    [0m Creating graph using `[3;35mNone[0m` transform and `[1;36m1[0m` libraries.               
+[A02994C6] loaded: n_bins=56,354, running summarize_all (incl. BLADE)...
+[A02994C6] done in 19.1s
+[A02994C6] wrote ../results/figure4/per_sample/A02994C6.json

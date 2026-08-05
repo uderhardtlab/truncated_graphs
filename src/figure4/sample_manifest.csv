@@ -1,0 +1,13 @@
+name,dataset_type,loader,h5ad_path,bin_size_um,tissue_mask_path
+breast_cancer,visium_demo,visium,/home/woody/iwbn/iwbn007h/spatial_data/visium/breast_cancer_008um_filtered.h5ad,8.0,
+pancreas,visium_demo,visium,/home/woody/iwbn/iwbn007h/spatial_data/visium/pancreas_008um_filtered.h5ad,8.0,
+colon_cancer_ff,visium_demo,visium,/home/woody/iwbn/iwbn007h/spatial_data/visium/colon_cancer_ff_008um_filtered.h5ad,8.0,
+breast_cancer_tma,visium_demo,visium,/home/woody/iwbn/iwbn007h/spatial_data/visium/breast_cancer_tma_008um_filtered.h5ad,8.0,
+Pat1,visium_custom,visium,/home/woody/iwbn/iwbn007h/spatial_data/visium_custom/Pat1_008um_filtered.h5ad,8.0,
+Pat2,visium_custom,visium,/home/woody/iwbn/iwbn007h/spatial_data/visium_custom/Pat2_008um_filtered.h5ad,8.0,
+Pat3,visium_custom,visium,/home/woody/iwbn/iwbn007h/spatial_data/visium_custom/Pat3_008um_filtered.h5ad,8.0,
+Pat4,visium_custom,visium,/home/woody/iwbn/iwbn007h/spatial_data/visium_custom/Pat4_008um_filtered.h5ad,8.0,
+A02991D1,stomics_custom,stomics,/home/woody/iwbn/iwbn007h/spatial_data/stomics/A02991D1.bin20_1.0.h5ad,10.0,/home/woody/iwbn/iwbn007h/spatial_data/stomics/A02991D1_ssDNA_tissue_cut.tif
+A02994C6,stomics_custom,stomics,/home/woody/iwbn/iwbn007h/spatial_data/stomics/A02994C6.bin20_1.0.h5ad,10.0,/home/woody/iwbn/iwbn007h/spatial_data/stomics/A02994C6_ssDNA_tissue_cut.tif
+Y01087DD,stomics_custom,stomics,/home/woody/iwbn/iwbn007h/spatial_data/stomics/Y01087DD.bin20_1.0.h5ad,10.0,/home/woody/iwbn/iwbn007h/spatial_data/stomics/Y01087DD_ssDNA_tissue_cut.tif
+Y01084J8,stomics_custom,stomics,/home/woody/iwbn/iwbn007h/spatial_data/stomics/Y01084J8.bin20_1.0.h5ad,10.0,/home/woody/iwbn/iwbn007h/spatial_data/stomics/Y01084J8_ssDNA_tissue_cut.tif

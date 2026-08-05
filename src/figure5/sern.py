@@ -1,5 +1,7 @@
 import numpy as np
 import os
+import tempfile
+import warnings
 import joblib
 from scipy.spatial.distance import pdist
 from joblib import Parallel, delayed
@@ -19,16 +21,16 @@ def generate_sern_vectorized(pair_probs, rows, cols, rng):
     edges = np.column_stack((rows[mask], cols[mask]))
     return edges
 
-def surrogate_worker_mmap(seed, prob_path, triu_path, N):
+def surrogate_worker_mmap(seed, prob_path, triu_path, N, measures):
     # mmap_mode='r' ensures all workers read the same physical RAM
     pair_probs = joblib.load(prob_path, mmap_mode='r')
     rows, cols = joblib.load(triu_path, mmap_mode='r')
     rng = np.random.default_rng(seed)
 
     edges = generate_sern_vectorized(pair_probs, rows, cols, rng)
-    return compute_centrality_measures(edges, N)
+    return compute_centrality_measures(edges, N, measures)
 
-def surrogate_ensemble_gt(coords, edge_list, n_bins, n_surrogates=200, n_jobs=-1):
+def surrogate_ensemble_gt(coords, edge_list, n_bins, measures, n_surrogates=200, n_jobs=-1):
     # 1. Calculate probabilities (keeping your existing logic)
     p, bin_edges, pair_bins = estimate_link_probability(coords, edge_list, n_bins)
     pair_probs = build_pair_probabilities(pair_bins, p)
@@ -38,11 +40,13 @@ def surrogate_ensemble_gt(coords, edge_list, n_bins, n_surrogates=200, n_jobs=-1
     # pairs. Both only depend on N/coords, not on the surrogate, so they are
     # computed once here and shared read-only across all workers instead of
     # being recomputed (and reallocated) inside every single surrogate call.
-    prob_path = 'pair_probs.mmap'
-    triu_path = 'triu_indices.mmap'
-    for path in (prob_path, triu_path):
-        if os.path.exists(path):
-            os.remove(path)
+    # Unique per-call temp paths (not fixed names in cwd) -- concurrent
+    # invocations, e.g. multiple SLURM array tasks sharing a working
+    # directory, would otherwise clobber each other's mmap files.
+    prob_fd, prob_path = tempfile.mkstemp(suffix=".mmap", prefix="pair_probs_")
+    triu_fd, triu_path = tempfile.mkstemp(suffix=".mmap", prefix="triu_indices_")
+    os.close(prob_fd)
+    os.close(triu_fd)
     joblib.dump(pair_probs, prob_path)
     joblib.dump(np.triu_indices(N, k=1), triu_path)
 
@@ -51,7 +55,7 @@ def surrogate_ensemble_gt(coords, edge_list, n_bins, n_surrogates=200, n_jobs=-1
 
     try:
         results = Parallel(n_jobs=n_jobs, batch_size='auto')(
-            delayed(surrogate_worker_mmap)(seed, prob_path, triu_path, N)
+            delayed(surrogate_worker_mmap)(seed, prob_path, triu_path, N, measures)
             for seed in tqdm(seeds, desc="SERN")
         )
     finally:
@@ -60,10 +64,17 @@ def surrogate_ensemble_gt(coords, edge_list, n_bins, n_surrogates=200, n_jobs=-1
             if os.path.exists(path):
                 os.remove(path)
 
-    # Compute median across all surrogates
+    # Compute median across all surrogates. compute_centrality_measures warns
+    # and just omits a measure (rather than raising) when it fails on a given
+    # surrogate graph (e.g. pagerank on an edgeless/disconnected draw), so
+    # results aren't guaranteed to share the same keys -- aggregate over
+    # whichever surrogates actually produced each key instead of assuming
+    # every one of them did.
     medians = {}
-    for key in results[0].keys():
-        values = np.array([np.asarray(r[key]) for r in results])
+    all_keys = set().union(*(r.keys() for r in results))
+    for key in all_keys:
+        present = [np.asarray(r[key]) for r in results if key in r]
+        values = np.array(present)
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", category=RuntimeWarning)
             measure_medians = np.nanmedian(values, axis=0)

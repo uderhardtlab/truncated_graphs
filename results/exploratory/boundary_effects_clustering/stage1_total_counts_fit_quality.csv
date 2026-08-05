@@ -1,0 +1,2 @@
+,best_fit_type,entropy_AIC_weights,observed_half_life,observed_effect_strength,included samples,affected samples,relative_likelihood_over_baseline,scaled_relative_likelihood_over_baseline,piecewise_linear_b,piecewise_linear_m,piecewise_linear_c
+log1p_total_counts,Piecewise Linear Fit,0.9992301446320054,0.037068534076805784,-0.017025970347376924,1.0,0.18377976190476192,1.769354373246101e+27,1.0236154583861528,138.42326303497495,0.0024751597914573703,9.890369101678164

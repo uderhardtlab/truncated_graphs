@@ -10,7 +10,7 @@ evaluation now delegate to the bosperrus package via the Flow class.
 import numpy as np
 import pandas as pd
 from scipy.spatial import ConvexHull
-from scipy.stats import pearsonr, vonmises_fisher
+from scipy.stats import pearsonr, spearmanr, vonmises_fisher
 
 from time import time
 from tqdm import trange
@@ -26,6 +26,17 @@ os.environ["OMP_NUM_THREADS"] = "8"
 NUMBER_OF_SERNS = 100
 N_JOBS = -1  # joblib: use all available cores on whatever machine this runs on
 N_OF_RUNS = 100
+
+# same 5 measures as figure3's compute_fits.py (excludes "harmonic")
+MEASURES = ["degree", "pagerank", "betweenness", "closeness", "clustering"]
+CORRELATION_METHODS = {"pearson": pearsonr, "spearman": spearmanr}
+
+# "affected" = nearest quartile of crop nodes to the border, by distance_to_cap
+# -- a purely geometric criterion (independent of any fitted correction model
+# and of the raw/corrected values themselves) meant to isolate where border
+# truncation actually biases a score, rather than diluting the correlation
+# with the majority of untouched interior nodes.
+AFFECTED_QUANTILE = 0.25
 
 OUTPUT_DIR = "../results/figure5"
 
@@ -93,17 +104,23 @@ def get_bosperrus_corrections(crop_coords, edges, measures, distances):
         distances=distances.reset_index(drop=True),
         scores=scores,
     )
-    bf.flow(score_names=list(measures))
+    # A measure that succeeded on the global graph can still fail on this
+    # particular local crop (e.g. pagerank on a disconnected/edgeless
+    # sub-sample) -- compute_centrality_measures already warns and just omits
+    # it rather than raising, so only fit whatever actually came back instead
+    # of the full requested `measures`.
+    bf.flow(score_names=list(scores.columns))
     bf.observations["degree"] = bf.observations["degree"].astype(int)
     return bf.observations
 
 
-def get_sern_median(crop_coords, local_edges):
+def get_sern_median(crop_coords, local_edges, measures):
     n_bins = int(np.sqrt(len(local_edges)))
     sern_median = surrogate_ensemble_gt(
         coords=crop_coords,
         edge_list=local_edges,
         n_bins=n_bins,
+        measures=list(measures),
         n_surrogates=NUMBER_OF_SERNS,
         n_jobs=N_JOBS,
     )
@@ -118,7 +135,7 @@ def process_coords(coords, edge_type, cap_radii, k=None, r=None):
     # --- global graph & centralities ---
     global_edges = get_edge_list(coords, edge_type, k=k, r=r)
     global_centralities = pd.DataFrame(
-        compute_centrality_measures(global_edges, N)
+        compute_centrality_measures(global_edges, N, MEASURES)
     )
     measures = global_centralities.columns
     all_correlations = []
@@ -130,60 +147,88 @@ def process_coords(coords, edge_type, cap_radii, k=None, r=None):
 
         local_edges = get_edge_list(crop_coords, edge_type, k=k, r=r)
         BOSPERRUS_results = get_bosperrus_corrections(crop_coords, local_edges, measures, distances)
-        sern_median = get_sern_median(crop_coords, local_edges)
+        sern_median = get_sern_median(crop_coords, local_edges, measures)
+
+        # A measure that succeeded on the global graph can still fail on this
+        # particular local crop (e.g. pagerank on a disconnected/edgeless
+        # sub-sample, or a SERN surrogate draw that happened to omit it) --
+        # only carry forward whichever measures are actually present on both
+        # sides for this cap_radius, rather than assuming all of `measures`.
+        cap_measures = [m for m in measures if m in BOSPERRUS_results.columns and m in sern_median.columns]
 
         # --- assemble result frame ---
         results = pd.concat(
             {
-                "original": global_centralities.loc[crop].sort_index(axis=0).sort_index(axis=1).reset_index(drop=True),
-                "crop": BOSPERRUS_results[measures].sort_index(axis=0).sort_index(axis=1),
+                "original": global_centralities.loc[crop, cap_measures].sort_index(axis=0).sort_index(axis=1).reset_index(drop=True),
+                "crop": BOSPERRUS_results[cap_measures].sort_index(axis=0).sort_index(axis=1),
                 "distance": BOSPERRUS_results["distance_to_cap"],
-                "BOSPERRUS_corrections": BOSPERRUS_results.filter(like="BOSPERRUS", axis=1).sort_index(axis=0).sort_index(axis=1),
-                "sern": sern_median.sort_index(axis=0).sort_index(axis=1),
+                "BOSPERRUS_corrections": BOSPERRUS_results[[f"BOSPERRUS corrected {m}" for m in cap_measures]].sort_index(axis=0).sort_index(axis=1),
+                "sern": sern_median[cap_measures].sort_index(axis=0).sort_index(axis=1),
                 "sern_corrected": (
-                    BOSPERRUS_results[measures].sort_index(axis=0).sort_index(axis=1)
-                    - sern_median.sort_index(axis=0).sort_index(axis=1)
+                    BOSPERRUS_results[cap_measures].sort_index(axis=0).sort_index(axis=1)
+                    - sern_median[cap_measures].sort_index(axis=0).sort_index(axis=1)
                 ),
             },
             axis=1,
         )
 
         # --- correlations ---
-        # TODO: check whether Spearman rank correlation should be used instead of
-        # Pearson — Rheinwalt et al. 2012 validate SERN correction via Spearman's
-        # rank correlation coefficient, not Pearson.
-        corrs_original_crop, corrs_original_corrected = [], []
-        corrs_original_sern, corrs_crop_sern = [], []
+        # Both Pearson and Spearman: Rheinwalt et al. 2012 validate SERN
+        # correction via Spearman's rank correlation, not Pearson, since
+        # centrality distributions are typically skewed/tied rather than
+        # linearly related; keeping Pearson alongside it for comparison.
+        #
+        # Also split by node_subset ("all" vs "affected"): correlating over
+        # every crop node dilutes the comparison with untouched interior
+        # nodes, especially now that only the bigger cap_radius is used, so
+        # "affected" restricts to the nearest AFFECTED_QUANTILE of nodes to
+        # the border -- a geometric criterion, independent of either
+        # correction method's fit and of the raw/corrected values themselves,
+        # so it can't bias the comparison toward whichever method it favors.
+        dist = results["distance"]["distance_to_cap"]
+        node_subsets = {
+            "all": pd.Series(True, index=results.index),
+            "affected": dist <= dist.quantile(AFFECTED_QUANTILE),
+        }
 
-        for m in measures:
-            corrs_original_crop.append(
-                pearsonr(results["original"][m], results["crop"][m]).statistic
-            )
-            corrs_original_corrected.append(
-                pearsonr(results["original"][m], results["BOSPERRUS_corrections"][f"BOSPERRUS corrected {m}"]).statistic
-            )
-            corrs_original_sern.append(
-                pearsonr(results["original"][m], results["sern_corrected"][m]).statistic
-            )
-            corrs_crop_sern.append(
-                pearsonr(results["crop"][m], results["sern"][m]).statistic
-            )
+        for corr_name, corr_fn in CORRELATION_METHODS.items():
+            for subset_name, subset_mask in node_subsets.items():
+                sub = results[subset_mask]
+                corrs_original_crop, corrs_original_corrected = [], []
+                corrs_original_sern, corrs_crop_sern = [], []
 
-        correlations = pd.DataFrame(index=measures)
-        correlations["original vs. on crop"] = corrs_original_crop
-        correlations["original vs. BOSPERRUS corrected on crop"] = corrs_original_corrected
-        correlations["original vs. SERN corrected on crop"] = corrs_original_sern
-        correlations["on crop vs. SERN values"] = corrs_crop_sern
-        correlations["cap_radius"] = cap_radius
-        all_correlations.append(correlations)
+                for m in cap_measures:
+                    corrs_original_crop.append(
+                        corr_fn(sub["original"][m], sub["crop"][m]).statistic
+                    )
+                    corrs_original_corrected.append(
+                        corr_fn(sub["original"][m], sub["BOSPERRUS_corrections"][f"BOSPERRUS corrected {m}"]).statistic
+                    )
+                    corrs_original_sern.append(
+                        corr_fn(sub["original"][m], sub["sern_corrected"][m]).statistic
+                    )
+                    corrs_crop_sern.append(
+                        corr_fn(sub["crop"][m], sub["sern"][m]).statistic
+                    )
+
+                correlations = pd.DataFrame(index=cap_measures)
+                correlations["original vs. on crop"] = corrs_original_crop
+                correlations["original vs. BOSPERRUS corrected on crop"] = corrs_original_corrected
+                correlations["original vs. SERN corrected on crop"] = corrs_original_sern
+                correlations["on crop vs. SERN values"] = corrs_crop_sern
+                correlations["cap_radius"] = cap_radius
+                correlations["corr_method"] = corr_name
+                correlations["node_subset"] = subset_name
+                all_correlations.append(correlations)
     return pd.concat(all_correlations)
 
 
-if __name__ == "__main__":
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
+def main(n_runs=N_OF_RUNS, n=5000, n_surrogates=NUMBER_OF_SERNS, output_dir=OUTPUT_DIR):
+    global NUMBER_OF_SERNS
+    NUMBER_OF_SERNS = n_surrogates
+    os.makedirs(output_dir, exist_ok=True)
 
-    n = 5000
-    for _ in trange(N_OF_RUNS):
+    for _ in trange(n_runs):
         all_correlations = []
 
         coord_configs = [
@@ -197,7 +242,7 @@ if __name__ == "__main__":
                 base_kwargs = dict(
                     coords=coords,
                     edge_type=edge_type,
-                    cap_radii=[1, 2],
+                    cap_radii=[2],  # bigger cap only -- see jobs/figure5_sphere.sbatch
                 )
 
                 if edge_type == "delaunay":
@@ -227,6 +272,28 @@ if __name__ == "__main__":
 
         timestamp = time()
         out_path = os.path.join(
-            OUTPUT_DIR, f"correlations_{timestamp}.csv"
+            output_dir, f"correlations_{timestamp}.csv"
         )
         pd.concat(all_correlations).to_csv(out_path)
+
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--n-runs", type=int, default=N_OF_RUNS,
+                         help="Number of outer repetitions to run (default: N_OF_RUNS). "
+                              "Each run writes its own timestamped CSV, so this can be "
+                              "used to split the full N_OF_RUNS across a SLURM array, "
+                              "one chunk per task.")
+    parser.add_argument("--n", type=int, default=5000,
+                         help="Points per sphere sample (default: 5000). Lower for a "
+                              "cheap smoke test.")
+    parser.add_argument("--n-surrogates", type=int, default=NUMBER_OF_SERNS,
+                         help=f"SERN ensemble size (default: {NUMBER_OF_SERNS}). Lower "
+                              "for a cheap smoke test.")
+    parser.add_argument("--output-dir", type=str, default=OUTPUT_DIR,
+                         help=f"Where to write result CSVs (default: {OUTPUT_DIR}). "
+                              "Use a separate directory for smoke tests so toy-scale "
+                              "output doesn't mix into the real dataset.")
+    args = parser.parse_args()
+    main(n_runs=args.n_runs, n=args.n, n_surrogates=args.n_surrogates, output_dir=args.output_dir)

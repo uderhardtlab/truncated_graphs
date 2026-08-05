@@ -1,152 +1,610 @@
-"""Visium HD tissue-border effect analysis.
+"""Visium HD / STOmics tissue-border effect analysis.
 
-For each 8um-binned Visium HD sample: identify tissue-border spots as grid
-positions with fewer than 4 von-Neumann grid-neighbors present in the tissue
-(squidpy.gr.spatial_neighbors_grid(n_rings=1, n_neighs=4)), then fit BOSPERRUS
-(ConstantFit / PiecewiseLinearFit) of log1p(total_counts) against distance to
-the nearest such border point.
+For each binned sample: identify tissue-border spots as grid positions with
+fewer than 4 von-Neumann grid-neighbors present in the tissue
+(squidpy.gr.spatial_neighbors_grid(n_rings=1, n_neighs=4)), split the tissue
+into its spatially-connected components (e.g. a TMA's individual cores, or
+any other disconnected fragments), and independently fit BOTH
+PiecewiseLinearFit (a discrete buffer/exclusion zone) and
+ExponentialSaturationFit (a smooth, diffusion-interpretable correction) of
+log1p(total_counts) against distance to the nearest border spot *within each
+component* -- independently of bosperrus.Flow.flow()'s single-AIC-winner
+selection, so both are always available regardless of which one AIC prefers.
+Components with too few bins to fit meaningfully are dropped; see
+_border_fit_from_adata's docstring for why distances are computed
+per-component rather than pooled across all tissue.
 """
 import gc
 import sys
 from pathlib import Path
 
+import h5py
 import numpy as np
 import scanpy as sc
 import squidpy
+import tifffile
+from matplotlib.colors import LinearSegmentedColormap, ListedColormap, to_rgb
+from matplotlib.lines import Line2D
 from scipy.sparse.csgraph import connected_components
+from skimage.color import rgb2gray
+from skimage.filters import gaussian, threshold_otsu
+from skimage.morphology import binary_closing, disk, remove_small_holes, remove_small_objects
+from skimage.segmentation import clear_border
 
 import bosperrus
-from bosperrus.fit import ConstantFit, PiecewiseLinearFit
+from bosperrus.fit import ConstantFit, PiecewiseLinearFit, ExponentialSaturationFit
+from bosperrus.pipeline import Flow
+from bosperrus.evaluate_fit import relative_likelihood, scaled_relative_likelihood
 from bosperrus.distances import distance_to_pointset
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from blade import peel_sweep
+
 
 def read_h5ad(h5ad_path):
     adata = sc.read_h5ad(h5ad_path)
     adata.obs["log1p_total_counts"] = np.log1p(np.asarray(adata.X.sum(axis=1)).ravel())
     return adata
 
-def analyze_dataset(h5ad_path):
-    """Load one Visium HD sample, restrict to its largest spatially-connected
-    tissue component, identify tissue-border spots (grid NN<4), and fit
-    BOSPERRUS of log1p(total_counts) against distance to the nearest border
-    spot. Returns a dict with the fitted Flow and the raw grid coords/counts
-    needed for downstream plotting. The loaded AnnData is dropped before
-    returning — these files are large (4-7GB), only small derived arrays are kept.
+
+def _fit_border_models(scores, d):
+    """Fit ConstantFit (baseline), PiecewiseLinearFit, and
+    ExponentialSaturationFit independently on the same (scores, d) data.
+
+    Unlike bosperrus.Flow.flow() -- which fits every candidate model but
+    only keeps the single AIC-best one, discarding the rest -- this keeps
+    both non-baseline fits so callers can use PiecewiseLinearFit's elbow
+    (discrete buffer zone) and ExponentialSaturationFit's smooth correction
+    side by side, regardless of which one AIC actually prefers. Reproduces
+    Flow.flow()'s AIC-weight/relative-likelihood bookkeeping by hand
+    (Flow._set_entropy_weights, relative_likelihood, scaled_relative_likelihood)
+    so Fit.params_summary() comes back fully populated for both, exactly as
+    it would if either had won inside Flow.flow().
     """
-    adata = read_h5ad(h5ad_path)
-    # tissue-border points: grid spots with fewer than 4 grid-neighbors
-    # (von Neumann/4-connectivity, radius = 1 grid step)
-    squidpy.gr.spatial_neighbors_grid(adata, n_rings=1, n_neighs=4)
-    n_components, labels = connected_components(adata.obsp["spatial_connectivities"], directed=False)
-    largest_component = np.argmax(np.bincount(labels))
-    adata = adata[labels == largest_component].copy()
+    baseline = ConstantFit(scores, d)
+    baseline.fit()
 
-    n_neighbors = np.diff(adata.obsp["spatial_connectivities"].indptr)
-    border_mask = n_neighbors < 4
+    piecewise_linear = PiecewiseLinearFit(scores, d)
+    piecewise_linear.fit_correct()
 
-    coords_grid = adata.obs[["array_row", "array_col"]].to_numpy()
-    border_coords_grid = coords_grid[border_mask]
+    exponential_saturation = ExponentialSaturationFit(scores, d)
+    exponential_saturation.fit_correct()
 
-    # distance to nearest tissue-border point (0 for the border points themselves)
-    dist_to_border = distance_to_pointset(coords_grid, border_coords_grid).rename("dist_to_tissue_border")
+    for fit_instance in (piecewise_linear, exponential_saturation):
+        fit_instance.relative_likelihood_over_baseline = relative_likelihood(fit_instance.AIC, baseline.AIC)
+        fit_instance.scaled_relative_loglikelihood_over_baseline = scaled_relative_likelihood(
+            fit_instance.AIC, baseline.AIC, len(d)
+        )
+    Flow._set_entropy_weights([baseline, piecewise_linear, exponential_saturation], baseline_fit=baseline)
 
-    scores = adata.obs[["log1p_total_counts"]].reset_index(drop=True)
-    flow = bosperrus.Flow.from_distances_and_scores(distances=dist_to_border, scores=scores)
-    flow.flow(fits=[ConstantFit, PiecewiseLinearFit])
-
-    result = {
-        "flow": flow,
-        "array_row": coords_grid[:, 0],
-        "array_col": coords_grid[:, 1],
-        "border_mask": border_mask,
-        "log1p_total_counts": adata.obs["log1p_total_counts"].to_numpy(),
+    return {
+        "baseline": baseline,
+        "piecewise_linear": piecewise_linear,
+        "exponential_saturation": exponential_saturation,
     }
+
+
+def exp_sat_diffusion_params(fit, bin_size_um):
+    """Reparametrize ExponentialSaturationFit's native S(d) = a*(1 - exp(-b*d)) + c
+    into the diffusion-interpretable form S(d) = gamma*(1 - beta*exp(-lambda*d)):
+
+        gamma  = a + c        asymptotic plateau (same units/value as the piecewise-
+                               linear plateau)
+        beta   = a / (a + c)  fractional deficit at the border: S(0) = c = gamma*(1-beta)
+        lambda = b             decay rate -- already in the right form, no conversion needed
+
+    This is an exact algebraic identity (same curve, same AIC, same
+    .correct()), not a refit. Also reports the "decay length" 1/lambda (the
+    exp-sat analogue of the piecewise-linear elbow) in grid-steps and um.
+    """
+    a = fit.params["exponential_saturation_a"]
+    b = fit.params["exponential_saturation_b"]
+    c = fit.params["exponential_saturation_c"]
+    gamma = a + c
+    beta = a / gamma
+    decay_length_gridstep = 1 / b
+    return {
+        "gamma": gamma,
+        "beta": beta,
+        "lambda_gridstep": b,
+        "lambda_per_um": b / bin_size_um,
+        "decay_length_gridstep": decay_length_gridstep,
+        "decay_length_um": decay_length_gridstep * bin_size_um,
+    }
+
+
+def rasterize_grid(array_row, array_col, values, fill=np.nan):
+    """Place per-bin `values` onto a dense 2D array over the (array_row,
+    array_col) bounding box (fill elsewhere, default NaN so ax.contour()
+    doesn't draw spurious lines through gaps/holes in the tissue footprint).
+    Returns (grid, row_offset, col_offset) so callers can align the grid back
+    to (array_row, array_col) coordinates, e.g. for ax.contour(x, y, grid, ...).
+    """
+    row_offset = int(np.min(array_row))
+    col_offset = int(np.min(array_col))
+    n_rows = int(np.max(array_row)) - row_offset + 1
+    n_cols = int(np.max(array_col)) - col_offset + 1
+    grid = np.full((n_rows, n_cols), fill, dtype=float)
+    grid[np.asarray(array_row) - row_offset, np.asarray(array_col) - col_offset] = values
+    return grid, row_offset, col_offset
+
+
+def sequential_colormap_from(hex_color, light_frac=0.85, n=256):
+    """Build a sequential single-hue colormap: a light tint of `hex_color`
+    (blended `light_frac` of the way to white, so near-zero values stay
+    visible against a white figure background) through to the full color."""
+    color = np.array(to_rgb(hex_color))
+    light = color + (1 - color) * light_frac
+    return LinearSegmentedColormap.from_list(f"seq_{hex_color}", [light, color], N=n)
+
+
+def _border_fit_from_adata(adata, min_component_size=100):
+    """Shared core of analyze_dataset()/analyze_stomics_dataset(): given an
+    AnnData whose .obs already has array_row/array_col and log1p_total_counts
+    (Visium's native columns; STOmics needs them derived first, see
+    read_stomics_h5ad), identify tissue-border spots (grid NN<4), split the
+    tissue into its spatially-connected components, and independently fit
+    both PiecewiseLinearFit and ExponentialSaturationFit of
+    log1p(total_counts) against distance to the nearest border spot *within
+    each component*.
+
+    Splitting matters not just for interpretability (e.g. a TMA's individual
+    cores are separate biological samples, not one pooled blob) but for
+    correctness: pooling distances across disconnected fragments (as an
+    earlier version of this pipeline did) lets a bin in one fragment end up
+    "nearest" to a border point belonging to a completely different,
+    physically disconnected fragment that just happens to sit close by in
+    raw grid coordinates -- not a meaningful distance for border-effect
+    modeling. Computing distance_to_pointset separately per component avoids
+    that; border detection itself (grid NN<4) is already a per-bin local
+    property and doesn't need splitting.
+
+    Components with <= min_component_size bins are dropped (too few points
+    to fit a 3-parameter curve meaningfully). Returns a list of result dicts,
+    one per surviving component (may be empty), each shaped like the
+    previous single-result dict plus component_id/component_size. The
+    AnnData is dropped before returning -- these files can be large, only
+    small derived arrays are kept.
+
+    Also carries along each bin's raw obsm["spatial"] pixel coordinate
+    (spatial_x/spatial_y, both loaders populate this: full-res CytAssist
+    pixel space for Visium, raw ssDNA/DNB pixel space for STOmics) --
+    unused by the border-fit/BLADE/CSV pipeline itself, but this is the
+    coordinate space get_sample_tissue_mask's image-derived masks are in,
+    so plot_image_tissue_vs_counts can align the two without a second,
+    separate load of the same AnnData.
+    """
+    # tissue-border points: grid spots with fewer than 4 grid-neighbors
+    # (von Neumann/4-connectivity, radius = 1 grid step). A per-bin local
+    # property, so computing it before splitting into components is fine --
+    # it's only the *distance to* those border points that must be computed
+    # per component (see docstring above).
+    squidpy.gr.spatial_neighbors_grid(adata, n_rings=1, n_neighs=4)
+    n_neighbors = np.diff(adata.obsp["spatial_connectivities"].indptr)
+    border_mask_all = n_neighbors < 4
+
+    _, labels = connected_components(adata.obsp["spatial_connectivities"], directed=False)
+    component_sizes = np.bincount(labels)
+
+    coords_grid_all = adata.obs[["array_row", "array_col"]].to_numpy()
+    coords_pixel_all = adata.obsm["spatial"]
+    scores_all = adata.obs["log1p_total_counts"]
+
+    results = []
+    for component_id in np.argsort(-component_sizes):
+        size = int(component_sizes[component_id])
+        if size <= min_component_size:
+            continue
+        member_mask = labels == component_id
+
+        coords_grid = coords_grid_all[member_mask]
+        coords_pixel = coords_pixel_all[member_mask]
+        border_mask = border_mask_all[member_mask]
+        border_coords_grid = coords_grid[border_mask]
+
+        # distance to nearest tissue-border point *within this component only*
+        dist_to_border = distance_to_pointset(coords_grid, border_coords_grid).rename("dist_to_tissue_border")
+        scores = scores_all[member_mask].reset_index(drop=True)
+        dist_to_border = dist_to_border.reset_index(drop=True)
+        fits = _fit_border_models(scores, dist_to_border)
+
+        results.append({
+            "fits": fits,
+            "array_row": coords_grid[:, 0],
+            "array_col": coords_grid[:, 1],
+            "spatial_x": coords_pixel[:, 0],
+            "spatial_y": coords_pixel[:, 1],
+            "border_mask": border_mask,
+            "dist_to_border": dist_to_border.to_numpy(),
+            "log1p_total_counts": scores.to_numpy(),
+            "component_id": int(component_id),
+            "component_size": size,
+        })
 
     del adata
     gc.collect()
-    return result
+    return results
 
 
-def summarize_fit(name, result, bin_size_um, measure="log1p_total_counts"):
-    """One summary row (best-fit type, effect strength, half-life fraction,
-    elbow location) for a single analyze_dataset() result.
+def analyze_dataset(h5ad_path, min_component_size=100):
+    """Load one Visium HD sample (10x-hosted demo or in-house spaceranger
+    run — both share the same square_{bin}um loader output) and run the
+    shared border/BOSPERRUS pipeline per connected component; see
+    _border_fit_from_adata. Returns a list of per-component result dicts."""
+    return _border_fit_from_adata(read_h5ad(h5ad_path), min_component_size=min_component_size)
 
-    Note on half_life_frac_of_dmax: it's deliberately scaled by d_max — it
-    reports what *fraction* of the maximum observed distance is affected, not
-    an absolute distance. That's what makes it comparable across datasets of
-    different extent; elbow_um is the absolute-distance version.
+
+def read_stomics_h5ad(h5ad_path, bin_size=20):
+    """Load a STOmics (Stereo-seq) bin*.h5ad and adapt it to the same
+    array_row/array_col/log1p_total_counts shape Visium's loader produces.
+
+    Unlike Visium HD, .X here already holds normalized/scaled values (not
+    raw counts) — obs already has a precomputed raw `total_counts` QC column
+    from the original pipeline, so that's log1p'd instead of summing X.
+    Grid coordinates come from obsm["spatial"] (integer Stereo-seq DNB
+    coordinates on a `bin_size`-unit lattice — nominal DNB pitch is 0.5um,
+    so bin_size=20 -> 10um bins); dividing by bin_size gives the same
+    small-integer array-row/col convention Visium uses, so
+    _border_fit_from_adata needs no dataset-type-specific logic.
     """
-    flow = result["flow"]
-    fit = flow.best_fits[measure]
+    adata = sc.read_h5ad(h5ad_path)
+    adata.obs["log1p_total_counts"] = np.log1p(adata.obs["total_counts"].to_numpy())
+    grid = np.round(adata.obsm["spatial"] / bin_size).astype(int)
+    adata.obs["array_col"] = grid[:, 0]
+    adata.obs["array_row"] = grid[:, 1]
+    return adata
+
+
+def analyze_stomics_dataset(h5ad_path, bin_size=20, min_component_size=100):
+    """STOmics counterpart of analyze_dataset — same border/BOSPERRUS
+    pipeline, different loader (see read_stomics_h5ad). Returns a list of
+    per-component result dicts."""
+    return _border_fit_from_adata(read_stomics_h5ad(h5ad_path, bin_size=bin_size), min_component_size=min_component_size)
+
+
+def segment_tissue_from_rgb(image, sigma=8, close_radius=10, min_hole_area=50000, min_object_area=3000):
+    """Simple, uniform tissue-vs-background segmentation for an H&E/CytAssist
+    RGB image: grayscale -> heavy Gaussian blur -> Otsu threshold (tissue is
+    darker than the white/light slide background) -> drop anything touching
+    the image border -> morphological closing + small-hole-filling +
+    small-object removal, to turn the raw threshold into a handful of solid
+    tissue blobs instead of a speckled "nuclei only" mask (a single global
+    Otsu on the *unblurred* grayscale image picks out only the darkest
+    nuclei-dense foci, not the bulk tissue outline, since H&E has a lot of
+    internal texture -- the blur washes that out first).
+
+    clear_border matters for real samples, not just a defensive extra: Pat3's
+    hires image has a faint scan-boundary artifact running almost the entire
+    image perimeter (confirmed: rows/columns 0-15ish read as ~90%+ "tissue"
+    before this step, dropping to baseline by row/col ~20) that Otsu alone
+    reads as tissue -- too large in area for min_object_area to catch (a
+    thin ring spanning a 6000x5200 image easily exceeds a few thousand
+    pixels) but disconnected from the real tissue blobs, so clear_border
+    removes it cleanly without touching them. None of this pipeline's real
+    tissue blobs happen to touch the image edge in the 8 Visium samples this
+    was checked against, so nothing else is lost by this step.
+
+    One fixed parameter set for all samples (not tuned per-sample) --
+    confirmed visually on both a single bulk tissue piece (breast_cancer,
+    solid blob outline recovered cleanly) and ~100 small, closely-spaced TMA
+    cores (breast_cancer_tma, cores stay distinct, none merged or dropped).
+    """
+    gray = rgb2gray(image)
+    blurred = gaussian(gray, sigma=sigma)
+    mask = blurred < threshold_otsu(blurred)
+    mask = clear_border(mask)
+    mask = binary_closing(mask, disk(close_radius))
+    mask = remove_small_holes(mask, area_threshold=min_hole_area)
+    mask = remove_small_objects(mask, min_size=min_object_area)
+    return mask
+
+
+def load_visium_tissue_mask(h5ad_path, library_id):
+    """Segment a Visium sample's own embedded hires CytAssist/H&E image (see
+    segment_tissue_from_rgb) as an image-only, counts-independent tissue
+    estimate. Reads only uns/spatial via h5py directly rather than
+    sc.read_h5ad -- these files can hold a >1M-bin counts matrix, none of
+    which this needs.
+
+    Returns (mask, pixel_scale): pixel_scale converts a bin's raw
+    obsm["spatial"] (full-res pixel) coordinate into this mask's own
+    (hires-image) pixel coordinate via mask_xy = obsm_spatial_xy *
+    pixel_scale -- i.e. scalefactors["tissue_hires_scalef"], the same
+    factor Space Ranger itself uses to align spots to the hires image.
+    """
+    with h5py.File(h5ad_path, "r") as f:
+        spatial_group = f["uns"]["spatial"][library_id]
+        image = spatial_group["images"]["hires"][:]
+        pixel_scale = float(spatial_group["scalefactors"]["tissue_hires_scalef"][()])
+    return segment_tissue_from_rgb(image), pixel_scale
+
+
+def load_stomics_tissue_mask(tissue_mask_path):
+    """Load BGI's own precomputed bulk tissue-region mask (already binary --
+    no segmentation needed; see spatial_data/README.md's stomics/ section for
+    provenance and why this is `*_ssDNA_tissue_cut.tif` specifically, not the
+    same-shaped but visually-distinct `*_ssDNA_mask.tif`, which is a
+    per-nucleus/cell segmentation, not a tissue-region mask).
+
+    Same raw-pixel coordinate space as obsm["spatial"] -- confirmed directly
+    (97-99% of every STOmics sample's bins land on a tissue_cut==1 pixel) --
+    so pixel_scale is 1.0, unlike the Visium case.
+    """
+    mask = tifffile.imread(tissue_mask_path) > 0
+    return mask, 1.0
+
+
+def get_sample_tissue_mask(row):
+    """Dispatch an image-derived tissue mask for one src/figure4/sample_manifest.csv
+    row: Visium samples (loader == "visium") segment their own embedded
+    image (load_visium_tissue_mask); STOmics samples (loader == "stomics")
+    load BGI's precomputed tissue_cut mask from the row's tissue_mask_path
+    column (STOmics h5ad files carry no embedded image at all -- see
+    spatial_data/README.md). Returns (mask, pixel_scale) as documented in
+    those two loaders.
+    """
+    if row["loader"] == "visium":
+        return load_visium_tissue_mask(row["h5ad_path"], row["name"])
+    elif row["loader"] == "stomics":
+        return load_stomics_tissue_mask(row["tissue_mask_path"])
+    raise ValueError(f"unknown loader {row['loader']!r}")
+
+
+def plot_image_tissue_vs_counts(ax, results, mask, pixel_scale, title=None,
+                                 tissue_color="#a6bddb", counts_color="#d62728",
+                                 scatter_size=0.5, scatter_alpha=0.25, margin_frac=0.05):
+    """A second, image-only approach to where the tissue border sits: overlay
+    the segmented/precomputed tissue mask (get_sample_tissue_mask -- derived
+    purely from the H&E/ssDNA image, no counts involved) with every analyzed
+    bin from all of a sample's connected components (the counts-derived
+    tissue footprint the rest of this notebook works with), in the same
+    pixel space.
+
+    This is a purely visual comparison, cropped to the bins' own bounding
+    box (+ margin) rather than the mask's full native canvas -- STOmics
+    tissue_cut masks in particular span a much larger raw chip than the
+    tissue region actually profiled, so showing the whole canvas would be
+    mostly empty. Counts-bins landing outside the tissue-colored region
+    (visible as red-on-white) show where RNA was captured beyond the image's
+    own tissue call; tissue-colored regions with no red bins on them show
+    the reverse gap. No distance/quantification is computed here -- see this
+    function's caller for follow-up ideas.
+    """
+    spatial_x = np.concatenate([r["spatial_x"] for r in results]) * pixel_scale
+    spatial_y = np.concatenate([r["spatial_y"] for r in results]) * pixel_scale
+
+    margin_x = (spatial_x.max() - spatial_x.min()) * margin_frac
+    margin_y = (spatial_y.max() - spatial_y.min()) * margin_frac
+    row0 = max(0, int(spatial_y.min() - margin_y))
+    row1 = min(mask.shape[0], int(spatial_y.max() + margin_y))
+    col0 = max(0, int(spatial_x.min() - margin_x))
+    col1 = min(mask.shape[1], int(spatial_x.max() + margin_x))
+    cropped_mask = mask[row0:row1, col0:col1]
+
+    tissue_cmap = ListedColormap(["white", tissue_color])
+    ax.imshow(cropped_mask, cmap=tissue_cmap, vmin=0, vmax=1, extent=[col0, col1, row1, row0])
+    ax.scatter(spatial_x, spatial_y, s=scatter_size, alpha=scatter_alpha, color=counts_color,
+               linewidths=0, rasterized=True)
+
+    if title:
+        ax.set_title(title, fontsize=10)
+    ax.set_aspect("equal")
+    ax.axis("off")
+
+
+def blade_comparison(result, min_group_size=30):
+    """Run blade.peel_sweep comparing raw vs. exponential-saturation-corrected
+    log1p_total_counts for one analyze_dataset() result, against the same
+    peel-layer masks. Corrects with the exp-sat fit specifically (not
+    whichever fit AIC preferred): exp-sat's correction is the smooth,
+    closed-form a*exp(-b*d) term (see exp_sat_diffusion_params's docstring
+    for the a/b -> gamma/beta/lambda correspondence), added back onto raw
+    counts. Returns (sweep_df, buffers) as documented in blade.peel_sweep.
+    """
+    raw = result["log1p_total_counts"]
+    exp = result["fits"]["exponential_saturation"]
+    a = exp.params["exponential_saturation_a"]
+    b = exp.params["exponential_saturation_b"]
+    correction = a * np.exp(-b * result["dist_to_border"])
+    corrected = raw + correction
+    return peel_sweep(
+        result["array_row"], result["array_col"],
+        {"raw": raw, "exp_sat_corrected": corrected},
+        min_group_size=min_group_size,
+    )
+
+
+def _flatten_params_summary(prefix, fit):
+    """Fit.params_summary() -> {f"{prefix}_{key}": value}, with spaces in
+    bosperrus's own key names (e.g. "affected samples") turned into
+    underscores for clean DataFrame/CSV column names. Adds AIC explicitly
+    (params_summary() doesn't include it, only the AIC-derived weights)."""
+    flat = {f"{prefix}_{key.replace(' ', '_')}": value for key, value in fit.params_summary().items()}
+    flat[f"{prefix}_AIC"] = fit.AIC
+    return flat
+
+
+def summarize_all(name, dataset_type, result, bin_size_um, blade_min_group_size=30):
+    """Comprehensive per-component summary row for the master results table:
+    flattens Fit.params_summary() for both piecewise-linear and
+    exponential-saturation fits (prefixed pl_/exp_), adds the diffusion-form
+    exp-sat params, elbow/decay-length in both grid-steps and um, an
+    AIC-based winner across all 3 models, BLADE buffers (raw and
+    exp-sat-corrected, grid-steps and um), and basic component metadata
+    (component_id/component_size, from analyze_dataset's per-component
+    splitting). Every bosperrus-native quantity is kept alongside its
+    um-converted counterpart.
+
+    Note: params_summary()'s own "best_fit_type" key is just each fit's own
+    name (e.g. always "Piecewise Linear Fit" for the pl_ columns) -- it does
+    NOT mean "this was the AIC winner" here, since both fits are always
+    computed regardless of AIC. `aic_best_model` below is the real winner.
+    """
+    fits = result["fits"]
+    baseline, pl, exp = fits["baseline"], fits["piecewise_linear"], fits["exponential_saturation"]
+
     row = {
-        "dataset": name,
-        "best_fit": fit.name,
-        "effect_strength": flow.fit_quality.loc["observed_effect_strength", measure],
-        "half_life_frac_of_dmax": flow.fit_quality.loc["observed_half_life", measure],
+        "name": name,
+        "dataset_type": dataset_type,
+        "bin_size_um": bin_size_um,
+        "component_id": result["component_id"],
+        "component_size": result["component_size"],
         "n_bins": len(result["log1p_total_counts"]),
+        "n_border_bins": int(result["border_mask"].sum()),
+        "const_c": baseline.params["constant_c"],
+        "const_AIC": baseline.AIC,
     }
-    if isinstance(fit, PiecewiseLinearFit):
-        row["elbow_grid_steps"] = fit.params["piecewise_linear_b"]
-        row["elbow_um"] = fit.params["piecewise_linear_b"] * bin_size_um
-        row["slope_m"] = fit.params["piecewise_linear_m"]
+
+    row.update(_flatten_params_summary("pl", pl))
+    row["pl_affected_pct"] = row["pl_affected_samples"] * 100
+    row["pl_elbow_grid_steps"] = pl.params["piecewise_linear_b"]
+    row["pl_elbow_um"] = pl.params["piecewise_linear_b"] * bin_size_um
+
+    row.update(_flatten_params_summary("exp", exp))
+    row["exp_affected_pct"] = row["exp_affected_samples"] * 100
+    for key, value in exp_sat_diffusion_params(exp, bin_size_um).items():
+        row[f"exp_{key}"] = value
+
+    row["aic_best_model"] = min(
+        [("Constant", baseline.AIC), ("PiecewiseLinear", pl.AIC), ("ExponentialSaturation", exp.AIC)],
+        key=lambda pair: pair[1],
+    )[0]
+
+    sweep_df, buffers = blade_comparison(result, min_group_size=blade_min_group_size)
+    row["blade_buffer_raw_grid_steps"] = buffers.get("raw", np.nan)
+    row["blade_buffer_raw_um"] = buffers.get("raw", np.nan) * bin_size_um
+    row["blade_buffer_exp_sat_corrected_grid_steps"] = buffers.get("exp_sat_corrected", np.nan)
+    row["blade_buffer_exp_sat_corrected_um"] = buffers.get("exp_sat_corrected", np.nan) * bin_size_um
+
     return row
 
 
-def plot_fit_curve(ax, fit, d, color="tab:red"):
-    """Overlay the fitted curve (piecewise-linear, or a flat line if
-    ConstantFit won) on a scatter axis."""
+def plot_counts_vs_distance_both_fits(ax, result, pl_color, exp_color, scatter_color="gray",
+                                       title=None, ylabel=None,
+                                       scatter_size=0.3, scatter_alpha=0.1, scatter_linewidths=0):
+    """Scatter of counts vs. distance to the nearest tissue-border point, with
+    BOTH the piecewise-linear (discrete buffer zone) and exponential-
+    saturation (smooth, diffusion-interpretable) fits overlaid, regardless of
+    which one AIC prefers. `ylabel` defaults to "log1p_total_counts"; pass ""
+    to suppress it (e.g. for non-leftmost columns of a sharey row)."""
+    d = result["dist_to_border"]
+    s = result["log1p_total_counts"]
+    ax.scatter(d, s, s=scatter_size, alpha=scatter_alpha, color=scatter_color,
+               linewidths=scatter_linewidths, rasterized=True)
+
     d_line = np.linspace(0, d.max(), 200)
-    if isinstance(fit, PiecewiseLinearFit):
-        b = fit.params["piecewise_linear_b"]
-        m = fit.params["piecewise_linear_m"]
-        c = fit.params["piecewise_linear_c"]
-        y_line = PiecewiseLinearFit.piecewise_plateau(d_line, b=b, m=m, c=c)
-        ax.plot(d_line, y_line, color=color, lw=2, label=f"piecewise-linear (elbow={b:.2f})")
-        ax.axvline(b, color=color, lw=1, ls="--", alpha=0.7)
-    else:
-        ax.axhline(fit.params["constant_c"], color=color, lw=2, label="constant (no effect)")
+
+    pl = result["fits"]["piecewise_linear"]
+    b, m, c = pl.params["piecewise_linear_b"], pl.params["piecewise_linear_m"], pl.params["piecewise_linear_c"]
+    ax.plot(d_line, PiecewiseLinearFit.piecewise_plateau(d_line, b=b, m=m, c=c),
+            color=pl_color, lw=2, label=f"piecewise-linear (elbow={b:.2f})")
+    ax.axvline(b, color=pl_color, lw=1, ls="--", alpha=0.7)
+
+    exp = result["fits"]["exponential_saturation"]
+    ea, eb, ec = (exp.params["exponential_saturation_a"], exp.params["exponential_saturation_b"],
+                  exp.params["exponential_saturation_c"])
+    decay_length = 1 / eb
+    ax.plot(d_line, ExponentialSaturationFit.exp_sat(d_line, ea, eb, ec),
+            color=exp_color, lw=2, label=f"exp. saturation (decay length={decay_length:.2f})")
+
+    ax.set_xlabel("distance to nearest tissue-border point (grid steps)")
+    ax.set_ylabel("log1p_total_counts" if ylabel is None else ylabel)
+    if title:
+        ax.set_title(title, fontsize=10)
     ax.legend(fontsize=8, loc="best")
 
 
-def plot_counts_vs_distance(ax, result, measure="log1p_total_counts", color="gray",
-                             fit_color="tab:red", title=None, ylabel=None,
-                             scatter_size=0.3, scatter_alpha=0.1, scatter_linewidths=0):
-    """Scatter of counts vs. distance to the nearest tissue-border point,
-    with the fitted BOSPERRUS curve overlaid. `ylabel` defaults to `measure`;
-    pass "" to suppress it (e.g. for non-leftmost columns of a sharey row)."""
-    flow = result["flow"]
-    d = flow.observations["dist_to_tissue_border"]
-    s = flow.observations[measure]
-    ax.scatter(d, s, s=scatter_size, alpha=scatter_alpha, color=color,
-               linewidths=scatter_linewidths, rasterized=True)
-    plot_fit_curve(ax, flow.best_fits[measure], d, color=fit_color)
-    ax.set_xlabel("distance to nearest tissue-border point (grid steps)")
-    ax.set_ylabel(measure if ylabel is None else ylabel)
-    if title:
-        ax.set_title(title)
+def _clip_correction_to_data_range(correction, counts):
+    """Clip one component's correction to its own observed count range. A
+    correction bigger in magnitude than the entire observed dynamic range of
+    the data it's supposedly correcting is definitionally a degenerate fit
+    (e.g. a small/noisy component's exp-sat fit landing on a huge |a|), not a
+    meaningful signal -- confirmed empirically (breast_cancer_tma_c4, 9220
+    bins, fit a=-1268 against log1p_total_counts that only spans a handful
+    of units; 3 of its parent sample's 44 components were similarly
+    degenerate, together >1% of the sample's pooled bins, meaning
+    percentile-based color clipping alone wasn't tight enough for every
+    sample -- this per-component clip is the principled fix, done before
+    pooling across components, rather than tuning the percentile threshold
+    further per pathological case). Bounds magnitude without assuming sign.
+    """
+    max_reasonable = float(counts.max() - counts.min())
+    if max_reasonable <= 0:
+        return np.zeros_like(correction)
+    return np.clip(correction, -max_reasonable, max_reasonable)
 
 
-def plot_decision_boundary(ax, result, measure="log1p_total_counts", cmap="viridis",
-                            boundary_color="tab:red", boundary_alpha=0.5, title=None,
-                            add_legend=False, vmin=0, vmax=6):
-    """Grid-space scatter colored by counts, with the tissue-border elbow
-    drawn as an exclusion boundary (bins within the elbow distance are
-    highlighted directly)."""
-    flow = result["flow"]
-    d_border = flow.observations["dist_to_tissue_border"].to_numpy()
+def _correction_color_range(correction, low_pct=1, high_pct=99):
+    """Robust vmin/vmax for the correction colormap: percentile-based rather
+    than raw min/max. A single degenerate component (e.g. a tiny, noisy
+    fragment whose exp-sat fit blew up to a huge |a|) is a small fraction of
+    the pooled bin count, so percentile clipping keeps it from hijacking the
+    shared color/alpha scale for an entire panel of otherwise well-behaved
+    components -- confirmed empirically (colon_cancer_ff's 113-bin
+    component c6 fit a=-459, swamping its 1.72M-bin main component c0's
+    a=1.01 on a raw min/max scale)."""
+    vmin = min(0.0, float(np.percentile(correction, low_pct)))
+    vmax = float(np.percentile(correction, high_pct))
+    if vmax <= 0:
+        vmax = max(float(correction.max()), 1e-12)
+    return vmin, vmax
+
+
+def _scale_alpha_by_correction(correction, vmax, max_alpha):
+    """Per-point alpha proportional to correction magnitude (relative to
+    `vmax`, see _correction_color_range), so bins with ~no correction fade to
+    fully transparent (revealing the counts base layer, see
+    plot_correction_map) instead of showing a visible tint -- only
+    genuinely-corrected, near-border bins should read as colored at all."""
+    if vmax <= 0:
+        return np.zeros_like(correction)
+    return np.clip(correction / vmax, 0, 1) * max_alpha
+
+
+def plot_correction_map(ax, result, exp_color, boundary_color, title=None, add_legend=False,
+                         scatter_size=0.5, scatter_alpha=0.3, counts_cmap="gray", counts_alpha=0.5,
+                         cbar_label="exp. sat. correction"):
+    """Grid-space scatter with the actual log1p(total_counts) as a base layer
+    (so real tissue/count structure stays visible everywhere, not just where
+    correction applies), overlaid with how much the exponential-saturation
+    model would correct each bin (closed-form a*exp(-b*d) -- see
+    exp_sat_diffusion_params's docstring for the a/b -> gamma/beta/lambda
+    correspondence), using a sequential colormap built from shades of
+    `exp_color`, with per-point alpha also scaled by correction magnitude
+    (see _scale_alpha_by_correction) so uncorrected interior bins let the
+    counts layer show through instead of a visible tint. The piecewise-
+    linear elbow is drawn as an unfilled contour outline (not a filled
+    highlight) around the bins within that distance -- mirrors row 1's own
+    elbow-as-outline styling (micron_comparison._plot_poly_boundary),
+    discrete-grid-appropriate implementation via rasterize_grid + ax.contour.
+    """
+    pl = result["fits"]["piecewise_linear"]
+    exp = result["fits"]["exponential_saturation"]
+    d_border = result["dist_to_border"]
     counts = result["log1p_total_counts"]
+    a = exp.params["exponential_saturation_a"]
+    b = exp.params["exponential_saturation_b"]
+    correction = a * np.exp(-b * d_border)
+    correction = _clip_correction_to_data_range(correction, counts)
 
-    ax.scatter(result["array_col"], result["array_row"], c=counts, cmap=cmap,
-               s=0.5, alpha=0.3, rasterized=True, vmin=vmin, vmax=vmax)
+    # base layer: actual counts, so tissue structure is visible everywhere,
+    # not just where the correction overlay has something to show.
+    ax.scatter(result["array_col"], result["array_row"], c=counts, cmap=counts_cmap,
+               s=scatter_size, alpha=counts_alpha, rasterized=True)
 
-    fit = flow.best_fits[measure]
-    if isinstance(fit, PiecewiseLinearFit):
-        b = fit.params["piecewise_linear_b"]
-        excluded = d_border <= b
-        ax.scatter(result["array_col"][excluded], result["array_row"][excluded],
-                   color=boundary_color, s=0.5, alpha=boundary_alpha, rasterized=True)
+    cmap = sequential_colormap_from(exp_color)
+    vmin, vmax = _correction_color_range(correction)
+    point_alpha = _scale_alpha_by_correction(correction, vmax, scatter_alpha)
+    sca = ax.scatter(result["array_col"], result["array_row"], c=correction, cmap=cmap,
+                      s=scatter_size, alpha=point_alpha, rasterized=True, vmin=vmin, vmax=vmax)
+    ax.figure.colorbar(sca, ax=ax, label=cbar_label, shrink=0.75, pad=0.02)
+
+    elbow = pl.params["piecewise_linear_b"]
+    excluded = (d_border <= elbow).astype(float)
+    grid, row_offset, col_offset = rasterize_grid(result["array_row"], result["array_col"], excluded)
+    x_coords = col_offset + np.arange(grid.shape[1])
+    y_coords = row_offset + np.arange(grid.shape[0])
+    ax.contour(x_coords, y_coords, grid, levels=[0.5], colors=[boundary_color], linewidths=2)
 
     if title:
         ax.set_title(title)
@@ -155,20 +613,74 @@ def plot_decision_boundary(ax, result, measure="log1p_total_counts", cmap="virid
     ax.axis("off")
 
     if add_legend:
-        ax.scatter([], [], color=boundary_color, label="excluded by tissue-border elbow")
-        ax.legend(fontsize=8, loc="lower left")
+        ax.legend(handles=[Line2D([0], [0], color=boundary_color, lw=2,
+                                   label="piecewise-linear elbow (buffer zone)")],
+                  fontsize=8, loc="lower left")
 
 
-def blade_comparison(result, measure="log1p_total_counts", min_group_size=30):
-    """Run blade.peel_sweep comparing raw vs. BOSPERRUS-corrected `measure`
-    for one analyze_dataset() result, against the same peel-layer masks.
-    Returns (sweep_df, buffers) as documented in blade.peel_sweep.
+def plot_correction_map_multi(ax, results, exp_color, boundary_color, title=None, add_legend=False,
+                               scatter_size=0.5, scatter_alpha=0.3, counts_cmap="gray", counts_alpha=0.5,
+                               cbar_label="exp. sat. correction"):
+    """Like plot_correction_map, but for a whole sample's worth of components
+    at once (the list analyze_dataset()/analyze_stomics_dataset() returns) --
+    e.g. all of a TMA's cores on one set of axes. Each component is colored
+    by its *own* component-local exp-sat correction and gets its *own*
+    piecewise-linear elbow outline (components were fit independently, see
+    _border_fit_from_adata's docstring for why), but all components share
+    one counts base layer, one color scale/colorbar, and one alpha scale.
+    Each component's correction is first clipped to its own data range (see
+    _clip_correction_to_data_range -- necessary, not just percentile
+    clipping: a sample can have enough degenerate components that their
+    pooled bins exceed the percentile cutoff), then the shared scale is
+    percentile-robust on top of that (_correction_color_range/
+    _scale_alpha_by_correction) so they're visually comparable within the
+    panel.
     """
-    flow = result["flow"]
-    raw = flow.observations[measure].to_numpy()
-    corrected = flow.observations[f"BOSPERRUS corrected {measure}"].to_numpy()
-    return peel_sweep(
-        result["array_row"], result["array_col"],
-        {"raw": raw, "bosperrus_corrected": corrected},
-        min_group_size=min_group_size,
-    )
+    all_col, all_row, all_counts, all_correction = [], [], [], []
+    for result in results:
+        exp = result["fits"]["exponential_saturation"]
+        a = exp.params["exponential_saturation_a"]
+        b = exp.params["exponential_saturation_b"]
+        counts = result["log1p_total_counts"]
+        correction = _clip_correction_to_data_range(a * np.exp(-b * result["dist_to_border"]), counts)
+        all_col.append(result["array_col"])
+        all_row.append(result["array_row"])
+        all_counts.append(counts)
+        all_correction.append(correction)
+    all_col = np.concatenate(all_col)
+    all_row = np.concatenate(all_row)
+    all_counts = np.concatenate(all_counts)
+    all_correction = np.concatenate(all_correction)
+
+    # base layer: actual counts, so tissue structure is visible everywhere,
+    # not just where the correction overlay has something to show.
+    ax.scatter(all_col, all_row, c=all_counts, cmap=counts_cmap,
+               s=scatter_size, alpha=counts_alpha, rasterized=True)
+
+    cmap = sequential_colormap_from(exp_color)
+    vmin, vmax = _correction_color_range(all_correction)
+    point_alpha = _scale_alpha_by_correction(all_correction, vmax, scatter_alpha)
+    sca = ax.scatter(all_col, all_row, c=all_correction, cmap=cmap,
+                      s=scatter_size, alpha=point_alpha, rasterized=True, vmin=vmin, vmax=vmax)
+    ax.figure.colorbar(sca, ax=ax, label=cbar_label, shrink=0.75, pad=0.02)
+
+    for result in results:
+        pl = result["fits"]["piecewise_linear"]
+        d_border = result["dist_to_border"]
+        elbow = pl.params["piecewise_linear_b"]
+        excluded = (d_border <= elbow).astype(float)
+        grid, row_offset, col_offset = rasterize_grid(result["array_row"], result["array_col"], excluded)
+        x_coords = col_offset + np.arange(grid.shape[1])
+        y_coords = row_offset + np.arange(grid.shape[0])
+        ax.contour(x_coords, y_coords, grid, levels=[0.5], colors=[boundary_color], linewidths=1)
+
+    if title:
+        ax.set_title(title, fontsize=10)
+    ax.set_aspect("equal")
+    ax.invert_yaxis()
+    ax.axis("off")
+
+    if add_legend:
+        ax.legend(handles=[Line2D([0], [0], color=boundary_color, lw=2,
+                                   label="piecewise-linear elbow (buffer zone, per component)")],
+                  fontsize=8, loc="lower left")
