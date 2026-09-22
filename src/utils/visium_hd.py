@@ -23,8 +23,10 @@ import numpy as np
 import scanpy as sc
 import squidpy
 import tifffile
+import zarr
 from matplotlib.colors import LinearSegmentedColormap, ListedColormap, to_rgb
 from matplotlib.lines import Line2D
+from scipy.sparse import csr_matrix
 from scipy.sparse.csgraph import connected_components
 from skimage.color import rgb2gray
 from skimage.filters import gaussian, threshold_otsu
@@ -39,6 +41,10 @@ from bosperrus.distances import distance_to_pointset
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from blade import peel_sweep
+
+STOMICS_DATA_DIR = Path("/home/woody/iwbn/iwbn007h/spatial_data/stomics")
+_MASK_CACHE_DIR = Path(__file__).resolve().parents[2] / "results" / "exploratory" / "visium_tissue_masks"
+_MASK_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def read_h5ad(h5ad_path):
@@ -262,6 +268,26 @@ def analyze_stomics_dataset(h5ad_path, bin_size=20, min_component_size=100):
     return _border_fit_from_adata(read_stomics_h5ad(h5ad_path, bin_size=bin_size), min_component_size=min_component_size)
 
 
+def load_counts_and_coords(loader_type, h5ad_path, bin_size=20):
+    """h5py-only load of total counts, array_row/array_col and raw
+    obsm["spatial"] -- skips building a full AnnData (PCA/neighbors/log1p
+    layer/clustering all get pulled in by plain read_h5ad, unused here;
+    confirmed via profiling: full load for the largest STOmics sample peaks
+    ~19GB RSS vs. <1GB for this targeted read)."""
+    with h5py.File(h5ad_path, "r") as f:
+        spatial = f["obsm"]["spatial"][:]
+        if loader_type == "visium":
+            X = csr_matrix((f["X"]["data"][:], f["X"]["indices"][:], f["X"]["indptr"][:]),
+                            shape=tuple(f["X"].attrs["shape"]))
+            n_counts = np.asarray(X.sum(axis=1)).ravel()
+            array_row, array_col = f["obs"]["array_row"][:], f["obs"]["array_col"][:]
+        else:
+            n_counts = f["obs"]["total_counts"][:]
+            grid = np.round(spatial / bin_size).astype(int)
+            array_col, array_row = grid[:, 0], grid[:, 1]
+    return n_counts, array_row, array_col, spatial
+
+
 def segment_tissue_from_rgb(image, sigma=8, close_radius=10, min_hole_area=50000, min_object_area=3000):
     """Simple, uniform tissue-vs-background segmentation for an H&E/CytAssist
     RGB image: grayscale -> heavy Gaussian blur -> Otsu threshold (tissue is
@@ -299,16 +325,16 @@ def segment_tissue_from_rgb(image, sigma=8, close_radius=10, min_hole_area=50000
     return mask
 
 
-def load_visium_tissue_mask(h5ad_path, library_id):
-    """Segment a Visium sample's own embedded hires CytAssist/H&E image (see
-    segment_tissue_from_rgb) as an image-only, counts-independent tissue
-    estimate. Reads only uns/spatial via h5py directly rather than
-    sc.read_h5ad -- these files can hold a >1M-bin counts matrix, none of
-    which this needs.
+def load_visium_hires_image(h5ad_path, library_id):
+    """Read a Visium sample's own embedded hires CytAssist/H&E image (RGB
+    array) straight from uns/spatial via h5py, rather than sc.read_h5ad --
+    these files can hold a >1M-bin counts matrix, none of which this needs.
+    Already a modest-sized "hires" image (Space Ranger's own downsample),
+    safe to load fully into memory unlike STOmics' native ssDNA TIFFs.
 
-    Returns (mask, pixel_scale): pixel_scale converts a bin's raw
-    obsm["spatial"] (full-res pixel) coordinate into this mask's own
-    (hires-image) pixel coordinate via mask_xy = obsm_spatial_xy *
+    Returns (image, pixel_scale): pixel_scale converts a bin's raw
+    obsm["spatial"] (full-res pixel) coordinate into this image's own
+    (hires-image) pixel coordinate via hires_xy = obsm_spatial_xy *
     pixel_scale -- i.e. scalefactors["tissue_hires_scalef"], the same
     factor Space Ranger itself uses to align spots to the hires image.
     """
@@ -316,7 +342,31 @@ def load_visium_tissue_mask(h5ad_path, library_id):
         spatial_group = f["uns"]["spatial"][library_id]
         image = spatial_group["images"]["hires"][:]
         pixel_scale = float(spatial_group["scalefactors"]["tissue_hires_scalef"][()])
-    return segment_tissue_from_rgb(image), pixel_scale
+    return image, pixel_scale
+
+
+def load_visium_tissue_mask(h5ad_path, library_id):
+    """Segment a Visium sample's own embedded hires image (see
+    segment_tissue_from_rgb) as an image-only, counts-independent tissue
+    estimate. Returns (mask, pixel_scale) -- see load_visium_hires_image's
+    docstring for pixel_scale's meaning (mask and image share the same
+    pixel grid, so the same pixel_scale applies to both).
+
+    Cached to _MASK_CACHE_DIR/{library_id}.npz, keyed by h5ad_path --
+    segment_tissue_from_rgb (Gaussian blur + Otsu + morphology) is expensive
+    enough that ST.ipynb and border_sanity_checks.ipynb would otherwise both
+    re-segment the same sample from scratch every run. Delete the cache file
+    (or this whole directory) if segment_tissue_from_rgb's parameters change."""
+    cache_path = _MASK_CACHE_DIR / f"{library_id}.npz"
+    if cache_path.exists():
+        cached = np.load(cache_path)
+        if cached["h5ad_path"].item() == str(h5ad_path):
+            return cached["mask"], cached["pixel_scale"].item()
+
+    image, pixel_scale = load_visium_hires_image(h5ad_path, library_id)
+    mask = segment_tissue_from_rgb(image)
+    np.savez_compressed(cache_path, mask=mask, pixel_scale=pixel_scale, h5ad_path=str(h5ad_path))
+    return mask, pixel_scale
 
 
 def load_stomics_tissue_mask(tissue_mask_path):
@@ -329,6 +379,17 @@ def load_stomics_tissue_mask(tissue_mask_path):
     Same raw-pixel coordinate space as obsm["spatial"] -- confirmed directly
     (97-99% of every STOmics sample's bins land on a tissue_cut==1 pixel) --
     so pixel_scale is 1.0, unlike the Visium case.
+
+    NOT counts-independent, unlike the Visium H&E case: the SAW pipeline's
+    `tissuecut` step (see pipeline-logs/stereo_log) takes the raw expression
+    matrix and per-spot read counts as direct inputs alongside the ssDNA
+    image, not just the image. Using this mask as an independent reference
+    for e.g. quantifying RNA-diffusion-driven signal outside the tissue
+    boundary would be partly circular. A genuinely image-only alternative,
+    segmented from the pre-tissuecut `*_ssDNA_regist.tif`, is precomputed at
+    spatial_data/stomics/{name}_ssDNA_tissue_mask_final_{small,native}.npz --
+    see that directory's README.md for how those were made and
+    src/exploratory/segment_stomics_tissue_final.py to reproduce them.
     """
     mask = tifffile.imread(tissue_mask_path) > 0
     return mask, 1.0
@@ -348,6 +409,32 @@ def get_sample_tissue_mask(row):
     elif row["loader"] == "stomics":
         return load_stomics_tissue_mask(row["tissue_mask_path"])
     raise ValueError(f"unknown loader {row['loader']!r}")
+
+
+def load_image_mask(loader_type, h5ad_path, name):
+    """Image-only tissue mask for a border-effect *reference* (not
+    get_sample_tissue_mask/load_stomics_tissue_mask's tissue_cut: that mask
+    is derived partly from counts, which would be circular here). STOmics
+    reads the counts-independent alternative segmented from the pre-tissuecut
+    ssDNA_regist.tif -- see load_stomics_tissue_mask's docstring."""
+    if loader_type == "visium":
+        return load_visium_tissue_mask(h5ad_path, name)
+    npz = np.load(STOMICS_DATA_DIR / f"{name}_ssDNA_tissue_mask_final_native.npz")
+    return npz["mask"], 1.0
+
+
+def load_cropped_image(loader_type, h5ad_path, sample, row0, row1, col0, col1):
+    """Visium's hires image is small -- load fully, then crop. STOmics' native
+    ssDNA TIFF (~1-2GB decompressed) is read via zarr, decoding only the
+    row-strips inside the crop (each row is its own compressed strip)."""
+    if loader_type == "visium":
+        image, _ = load_visium_hires_image(h5ad_path, sample)
+        return image[row0:row1, col0:col1]
+    store = tifffile.imread(STOMICS_DATA_DIR / f"{sample}_ssDNA_regist.tif", aszarr=True)
+    z = zarr.open(store, mode="r")
+    crop = np.asarray(z[row0:row1, col0:col1])
+    store.close()
+    return crop
 
 
 def plot_image_tissue_vs_counts(ax, results, mask, pixel_scale, title=None,
@@ -390,6 +477,78 @@ def plot_image_tissue_vs_counts(ax, results, mask, pixel_scale, title=None,
         ax.set_title(title, fontsize=10)
     ax.set_aspect("equal")
     ax.axis("off")
+
+
+def block_or_pool(arr, factor):
+    """OR-reduce a boolean array in factor x factor blocks (cropping any
+    remainder rows/cols that don't fill a full block). factor=1 returns arr
+    unchanged. Used to downsample a boolean mask/occupancy layer to a modest
+    resolution before contour/imshow -- see plot_mask_overlap_transparent's
+    docstring for why this matters (naive downsampling aliases sparse
+    boolean layers into illegible speckle)."""
+    if factor <= 1:
+        return arr
+    h, w = arr.shape
+    h2, w2 = (h // factor) * factor, (w // factor) * factor
+    return arr[:h2, :w2].reshape(h2 // factor, factor, w2 // factor, factor).any(axis=(1, 3))
+
+
+def plot_mask_overlap_transparent(ax, results, mask, pixel_scale, title=None,
+                                   mask_color="#1f77b4", spot_color="#d62728",
+                                   alpha=0.55, target_size=800, margin_frac=0.05):
+    """Overlay the image mask and a rasterized bin mask as two independent
+    translucent color layers, so overlap reads as a blended color while
+    each mask alone stays in its own color.
+
+    A first attempt at this (plot_mask_overlap_categorical, since removed)
+    colored every pixel by one of 4 hard categories at the mask's *native*
+    resolution -- looked like illegible "braille" once matplotlib had to
+    downsample a huge sparse array into a small subplot, since isolated
+    single-pixel categories (e.g. a lone bin-outside-mask pixel) get
+    aliased away or reduced to scattered specks by that resize. Fixed here
+    by explicitly max-pooling (OR-reducing) both boolean layers down to a
+    common, modest resolution *before* plotting, so every rendered pixel
+    faithfully means "was any of this true in this block" rather than an
+    arbitrary decimated sample -- what's plotted is what's actually there.
+
+    Returns (cropped_mask, cropped_spots), the two boolean layers actually
+    rendered (post-crop, post-pooling), in case a caller wants them.
+    """
+    spatial_x = np.concatenate([r["spatial_x"] for r in results]) * pixel_scale
+    spatial_y = np.concatenate([r["spatial_y"] for r in results]) * pixel_scale
+
+    margin_x = (spatial_x.max() - spatial_x.min()) * margin_frac
+    margin_y = (spatial_y.max() - spatial_y.min()) * margin_frac
+    row0 = max(0, int(spatial_y.min() - margin_y))
+    row1 = min(mask.shape[0], int(spatial_y.max() + margin_y))
+    col0 = max(0, int(spatial_x.min() - margin_x))
+    col1 = min(mask.shape[1], int(spatial_x.max() + margin_x))
+
+    spot_raster = np.zeros(mask.shape, dtype=bool)
+    rows = np.clip(np.round(spatial_y).astype(int), 0, mask.shape[0] - 1)
+    cols = np.clip(np.round(spatial_x).astype(int), 0, mask.shape[1] - 1)
+    spot_raster[rows, cols] = True
+
+    cropped_mask = mask[row0:row1, col0:col1]
+    cropped_spots = spot_raster[row0:row1, col0:col1]
+
+    factor = max(1, round(cropped_mask.shape[0] / target_size))
+    cropped_mask = block_or_pool(cropped_mask, factor)
+    cropped_spots = block_or_pool(cropped_spots, factor)
+
+    def transparent_cmap(hex_color):
+        return ListedColormap([(0, 0, 0, 0), (*to_rgb(hex_color), alpha)])
+
+    ax.imshow(cropped_mask, cmap=transparent_cmap(mask_color), vmin=0, vmax=1,
+              extent=[col0, col1, row1, row0], interpolation="nearest")
+    ax.imshow(cropped_spots, cmap=transparent_cmap(spot_color), vmin=0, vmax=1,
+              extent=[col0, col1, row1, row0], interpolation="nearest")
+
+    if title:
+        ax.set_title(title, fontsize=10)
+    ax.set_aspect("equal")
+    ax.axis("off")
+    return cropped_mask, cropped_spots
 
 
 def blade_comparison(result, min_group_size=30):

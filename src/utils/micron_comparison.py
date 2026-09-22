@@ -5,42 +5,17 @@ lab's "outer synapse fraction" heuristic for identifying which neurons/spatial
 bins in the MICrONS mm^3 connectome are affected by the edge effect (missing
 synapses near the reconstructed volume's boundary).
 
-Run standalone:
-    cd truncated_graphs/
-    uv run python src/figure4/micron_comparison.py
+A library of functions driven by notebooks/supplement/MICRONS_analysis_buffer.ipynb,
+which owns every path/threshold/style setting; nothing here has a default.
 """
-import os
-
 import alphashape
 import conntility
 import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
 from matplotlib.lines import Line2D
-from shapely.geometry import Point
 
 import bosperrus
-
-# ── paths & constants ─────────────────────────────────────────────────────────
-# FN_MAT still points at a je30bery-only path that doesn't resolve on this
-# checkout — update once the actual connectome file's location here is known.
-FN_MAT        = "/data/bionets/je30bery/bosperrus-experiments/reimann_data/microns_mm3_connectome.h5"
-SAVE_PATH_SVG = os.path.join(os.path.dirname(__file__), "..", "..", "result_plots", "figure4", "fig_microns_buffer.svg")
-SAVE_PATH_PDF = os.path.join(os.path.dirname(__file__), "..", "..", "..", "bosperrus", "figures", "figure4", "fig4_prelim_microns_buffer.pdf")
-
-REIMANN_THRESH = 0.05
-NBINS          = 51
-ALPHA_SHAPE    = 0.0001
-
-# ── colour palette ────────────────────────────────────────────────────────────
-C_IND   = "#0033FF"
-C_OUT   = "#00B2FF"
-C_DEG   = "#000E47"
-C_SAFE  = "#46E895"
-C_SAFE2 = "#084023"
-
-SCORE_COLORS = {"indegree": C_IND, "outdegree": C_OUT, "degree": C_DEG}
-SCORE_LABELS = {"indegree": "Indegree", "outdegree": "Outdegree", "degree": "Degree"}
 
 
 # ── data preparation ──────────────────────────────────────────────────────────
@@ -49,7 +24,7 @@ def load_connectome(fn_mat, dataset="full"):
     return conntility.ConnectivityMatrix.from_h5(fn_mat, dataset)
 
 
-def bin_reimann(M, nbins=NBINS):
+def bin_reimann(M, nbins):
     """Bin edges/vertices into an nbins x nbins x-z grid and flag "outer" bins
     (Reimann's border-region heuristic: bin synapse count < 1000, or within 3
     bins of the top/bottom of the z-stack). Mutates M in place (adds edge/vertex
@@ -80,15 +55,14 @@ def bin_reimann(M, nbins=NBINS):
     return C, I
 
 
-def compute_alpha_shape_distances(M, alpha=ALPHA_SHAPE):
+def compute_alpha_shape_distances(M, alpha):
     """Fit an alpha shape to the neurons' x-z footprint and compute each
-    neuron's distance to its boundary."""
+    neuron's distance to its boundary (via bosperrus.distance_to_alpha_shape).
+    Returns the shape geometry (needed for plotting) and the distances.
+    """
     coords_xz = M.vertices[["x_nm", "z_nm"]].values
     alpha_shape = alphashape.alphashape(coords_xz, alpha=alpha)
-    alpha_distances = np.array([
-        alpha_shape.boundary.distance(Point(x, z))
-        for x, z in coords_xz
-    ])
+    alpha_distances = bosperrus.distance_to_alpha_shape(coords_xz, alpha=alpha).values
     return alpha_shape, alpha_distances
 
 
@@ -104,16 +78,15 @@ def fit_bosperrus(alpha_distances, scores):
     return flow
 
 
-def compute_reimann_comparison(M, C, flow, alpha_distances, reimann_thresh=REIMANN_THRESH, nbins=NBINS):
-    """Compare BOSPERRUS's elbow-based affected-neuron classification against
-    Reimann's per-neuron and per-bin outer-synapse-fraction heuristics, via
-    Jaccard index. Returns a dict with the comparison dataframe, Jaccard
-    indices, counts, and the max/mean per-bin outer-synapse-fraction grids
-    (for the boundary heatmap panel).
+def compute_reimann_comparison(M, C, flow, alpha_distances, reimann_thresh, nbins):
+    """Compare BOSPERRUS's elbow-based affected-neuron classification (using
+    the indegree fit's elbow) against Reimann's per-neuron and per-bin
+    outer-synapse-fraction heuristics, via Jaccard index. Returns a dict with
+    the comparison dataframe, Jaccard indices, counts, and the max/mean
+    per-bin outer-synapse-fraction grids (for the boundary heatmap panel).
     """
     x_col, z_col = f"x_nm_binned_{nbins}", f"z_nm_binned_{nbins}"
-    elbows = {s: flow.best_fits[s].params["piecewise_linear_b"] for s in ["indegree", "outdegree", "degree"]}
-    elbow = elbows["indegree"]  # indegree elbow used for binary classification
+    elbow = flow.best_fits["indegree"].params["piecewise_linear_b"]
 
     df = M.vertices[["x_nm", "z_nm"]].copy()
     df["outer_syn_fraction"] = C.vertices["outer_syn_fraction"].values
@@ -143,7 +116,7 @@ def compute_reimann_comparison(M, C, flow, alpha_distances, reimann_thresh=REIMA
     j_bin = jaccard(df["bosperrus_affected"], bin_reimann_affected)
 
     return {
-        "df": df, "elbows": elbows, "elbow": elbow,
+        "df": df, "elbow": elbow,
         "jaccard_neuron": j_neuron, "jaccard_bin": j_bin,
         "n_bosperrus": int(df["bosperrus_affected"].sum()),
         "n_reimann_neuron": int(df["reimann_affected"].sum()),
@@ -167,19 +140,21 @@ def print_comparison_summary(comparison):
     print(f"  Reimann per-bin    : {c['jaccard_bin']:.3f}")
 
 
-def prepare_microns_data(fn_mat, nbins=NBINS, alpha=ALPHA_SHAPE, reimann_thresh=REIMANN_THRESH):
+def prepare_microns_data(fn_mat, nbins, alpha, reimann_thresh):
     """End-to-end MICrONS data preparation: load the connectome, bin it for
     the Reimann heuristic, fit BOSPERRUS against alpha-shape-boundary
-    distance, and compute the bosperrus-vs-Reimann comparison. Returns a dict
-    bundling everything the plotting functions need.
+    distance (indegree and degree only), and compute the bosperrus-vs-Reimann
+    comparison. Returns a dict bundling everything the plotting functions need.
     """
     M = load_connectome(fn_mat)
     C, _ = bin_reimann(M, nbins=nbins)
 
     alpha_shape, alpha_distances = compute_alpha_shape_distances(M, alpha=alpha)
 
-    scores = M.vertices[["indegree", "outdegree"]].copy()
-    scores["degree"] = scores[["indegree", "outdegree"]].sum(axis=1)
+    scores = pd.DataFrame({
+        "indegree": M.vertices["indegree"],
+        "degree": M.vertices["indegree"] + M.vertices["outdegree"],
+    })
 
     flow = fit_bosperrus(alpha_distances, scores)
     comparison = compute_reimann_comparison(M, C, flow, alpha_distances,
@@ -199,36 +174,28 @@ def prepare_microns_data(fn_mat, nbins=NBINS, alpha=ALPHA_SHAPE, reimann_thresh=
 
 
 # ── plotting ──────────────────────────────────────────────────────────────────
-def plot_fits_panel(ax, flow, alpha_distances, scores, measures=("indegree", "outdegree", "degree"),
-                     scatter_color=None, fit_color=None, labels=None,
-                     legend_label_fn=None, ylabel="Centrality score", title=None,
-                     scatter_size=0.4, scatter_alpha=0.06, scatter_linewidths=0):
-    """Scatter of centrality score(s) vs. distance to the alpha-shape
-    boundary, overlaid with the fitted piecewise-linear BOSPERRUS curve(s).
-    Pass a single measure (e.g. ["degree"]) with a flat scatter_color/fit_color
-    for a single-curve panel; omit them to fall back to the per-measure
-    SCORE_COLORS palette (indegree/outdegree/degree plotted together).
-    legend_label_fn(measure, b, m, c), if given, overrides the default
-    SCORE_LABELS-based legend text (e.g. to show the fitted elbow value).
+def plot_fits_panel(ax, flow, alpha_distances, scores, measure,
+                     scatter_color, fit_color, legend_label_fn,
+                     ylabel, title,
+                     scatter_size, scatter_alpha, scatter_linewidths):
+    """Scatter of `measure`'s centrality score vs. distance to the alpha-shape
+    boundary, overlaid with the fitted piecewise-linear BOSPERRUS curve.
+    `legend_label_fn(measure, b, m, c)` builds the legend text (e.g. to show
+    the fitted elbow value).
     """
-    labels = labels or SCORE_LABELS
     d_sorted = np.sort(alpha_distances)
 
-    for measure in measures:
-        fit = flow.best_fits[measure]
-        b = fit.params["piecewise_linear_b"]
-        m = fit.params["piecewise_linear_m"]
-        c = fit.params["piecewise_linear_c"]
-        s_color = scatter_color if scatter_color is not None else SCORE_COLORS[measure]
-        f_color = fit_color if fit_color is not None else SCORE_COLORS[measure]
+    fit = flow.best_fits[measure]
+    b = fit.params["piecewise_linear_b"]
+    m = fit.params["piecewise_linear_m"]
+    c = fit.params["piecewise_linear_c"]
 
-        ax.scatter(alpha_distances / 1e3, scores[measure],
-                   s=scatter_size, alpha=scatter_alpha, color=s_color,
-                   linewidths=scatter_linewidths, rasterized=True)
-        y_fit = bosperrus.PiecewiseLinearFit.piecewise_plateau(d_sorted, b=b, m=m, c=c)
-        label = legend_label_fn(measure, b, m, c) if legend_label_fn else labels[measure]
-        ax.plot(d_sorted / 1e3, y_fit, color=f_color, lw=2, label=label)
-        ax.axvline(b / 1e3, color=f_color, lw=1.2, ls="--", alpha=0.85)
+    ax.scatter(alpha_distances / 1e3, scores[measure],
+               s=scatter_size, alpha=scatter_alpha, color=scatter_color,
+               linewidths=scatter_linewidths, rasterized=True)
+    y_fit = bosperrus.PiecewiseLinearFit.piecewise_plateau(d_sorted, b=b, m=m, c=c)
+    ax.plot(d_sorted / 1e3, y_fit, color=fit_color, lw=2, label=legend_label_fn(measure, b, m, c))
+    ax.axvline(b / 1e3, color=fit_color, lw=1.2, ls="--", alpha=0.85)
 
     ax.set_yscale("log")
     ax.set_xlabel("Distance to boundary (µm)")
@@ -247,11 +214,11 @@ def _plot_poly_boundary(ax, geom, **kwargs):
             ax.plot(coords[:, 0] / 1e3, coords[:, 1] / 1e3, **kwargs)
 
 
-def plot_boundary_heatmap_panel(ax, data, reimann_thresh=REIMANN_THRESH, cmap="magma",
-                                 boundary_label="tissue boundary", boundary_color="gray",
-                                 reimann_neuron_label="Reimann 5% (per neuron)", reimann_neuron_color=C_SAFE,
-                                 reimann_bin_label="Reimann 5% (per bin max)", reimann_bin_color=C_SAFE2,
-                                 elbow_color=C_IND, legend_bbox_to_anchor=(0.5, -0.4)):
+def plot_boundary_heatmap_panel(ax, data, reimann_thresh, cmap,
+                                 boundary_label, boundary_color,
+                                 reimann_neuron_label, reimann_neuron_color,
+                                 reimann_bin_label, reimann_bin_color,
+                                 elbow_color, legend_bbox_to_anchor):
     """Max outer-synapse-fraction heatmap with Reimann contours, the
     alpha-shape tissue boundary, and the bosperrus elbow boundary overlaid.
     `data` is the dict returned by prepare_microns_data.
@@ -289,31 +256,3 @@ def plot_boundary_heatmap_panel(ax, data, reimann_thresh=REIMANN_THRESH, cmap="m
     ax.set_ylabel("z (µm)")
     ax.set_aspect("equal")
     ax.spines[["top", "right"]].set_visible(False)
-
-
-def main(fn_mat=FN_MAT, save_path_svg=SAVE_PATH_SVG, save_path_pdf=SAVE_PATH_PDF):
-    """Reproduce the original 2-panel MICrONS figure (fits + boundary heatmap)
-    and print the bosperrus-vs-Reimann comparison summary."""
-    plt.rcParams["svg.fonttype"] = "none"
-
-    data = prepare_microns_data(fn_mat)
-    print_comparison_summary(data["comparison"])
-
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 3), width_ratios=[1, 2])
-    fig.subplots_adjust(wspace=0.2)
-
-    plot_fits_panel(ax1, data["flow"], data["alpha_distances"], data["scores"])
-    plot_boundary_heatmap_panel(ax2, data)
-
-    for ax, label in zip([ax1, ax2], ["a.", "b."]):
-        ax.text(-0.18, 1.08, label, transform=ax.transAxes,
-                fontsize=11, fontweight="bold", va="top")
-
-    os.makedirs(os.path.dirname(save_path_svg), exist_ok=True)
-    fig.savefig(save_path_svg, bbox_inches="tight")
-    fig.savefig(save_path_pdf, bbox_inches="tight", dpi=300)
-    plt.show()
-
-
-if __name__ == "__main__":
-    main()
