@@ -1,6 +1,6 @@
 """Cache-backed BLADE + bosperrus border-effect fitting, one spatially-
 connected grid component at a time. Shared by notebooks/ST.ipynb and
-notebooks/supplement/border_sanity_checks.ipynb."""
+notebooks/border_sanity_checks.ipynb."""
 import json
 import sys
 from datetime import datetime, timezone
@@ -9,8 +9,6 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from scipy.sparse import csr_matrix
-from scipy.sparse.csgraph import connected_components
 
 import bosperrus
 
@@ -23,7 +21,7 @@ CACHE_DIR = TRUNCATED_GRAPHS_DIR / "results" / "exploratory" / "st_border_compar
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 ALL_SAMPLES = pd.read_csv(MANIFEST_PATH)
-FIT_PALETTE = json.loads((TRUNCATED_GRAPHS_DIR / "fit_palette.json").read_text())
+FIT_PALETTE = bosperrus.FIT_PALETTE
 BOSPERRUS_VERSION = pkg_version("bosperrus")
 MIN_COMPONENT_SPOTS = 1000
 
@@ -44,27 +42,22 @@ def _jsonify(obj):
 
 def get_grid_components(array_row, array_col, min_size=MIN_COMPONENT_SPOTS):
     """Split a sample into its spatially-connected fragments on the
-    (array_row, array_col) grid (von Neumann/NN<4 adjacency, via
-    bosperrus.grid_edges) -- e.g. a TMA's individual cores, kept separate so
-    border-distance/BLADE stats never pool across physically disconnected
-    tissue. Fragments with <= min_size spots are dropped.
+    (array_row, array_col) grid (von Neumann/NN<4 adjacency) -- e.g. a TMA's
+    individual cores, kept separate so border-distance/BLADE stats never
+    pool across physically disconnected tissue. Fragments with <= min_size
+    spots are dropped.
 
-    Returns [(component_rank, member_mask, size), ...], largest first.
+    Thin wrapper around bosperrus.split_into_connected_components, adapting
+    its per-node label array into this module's own [(component_rank,
+    member_mask, size), ...] shape (largest first) -- kept for backward
+    compatibility with existing callers (ST.ipynb, border_sanity_checks.ipynb,
+    notebooks/tutorials/bosperrus_on_TMA.ipynb).
     """
-    edges = bosperrus.grid_edges(array_row, array_col, grid_type="rect")
-    n = len(array_row)
-    rows, cols = zip(*edges) if edges else ((), ())
-    adjacency = csr_matrix((np.ones(2 * len(rows)), (rows + cols, cols + rows)), shape=(n, n))
-    _, labels = connected_components(adjacency, directed=False)
-    sizes = np.bincount(labels)
-
-    components, rank = [], 0
-    for label in np.argsort(-sizes):
-        size = int(sizes[label])
-        if size <= min_size:
-            continue
-        components.append((rank, labels == label, size))
-        rank += 1
+    labels = bosperrus.split_into_connected_components(array_row, array_col, grid_type="rect", min_size=min_size)
+    components = []
+    for rank in sorted(r for r in np.unique(labels) if r >= 0):
+        member_mask = labels == rank
+        components.append((int(rank), member_mask, int(member_mask.sum())))
     return components
 
 
@@ -87,15 +80,21 @@ def native_pixel_size_um(array_row, array_col, spatial, bin_size_um, max_edges=2
 
 
 def grid_border_distance(array_row, array_col):
-    """Per-spot Euclidean distance to the nearest border spot (grid degree <
-    4, von Neumann adjacency)."""
-    edges = bosperrus.grid_edges(array_row, array_col, grid_type="rect")
-    degree = np.zeros(len(array_row), dtype=int)
-    for u, v in edges:
-        degree[u] += 1
-        degree[v] += 1
-    coords = np.column_stack([array_row, array_col])
-    return bosperrus.distance_to_pointset(coords, coords[degree < 4]).to_numpy()
+    """Per-spot Euclidean distance (in grid steps) to the nearest border spot
+    (grid degree < 4, von Neumann adjacency), computed within each
+    spatially-connected component separately.
+
+    Thin wrapper around bosperrus.distance_to_grid_border -- bin_size_um=1.0
+    keeps this function's original grid-step units (callers multiply by the
+    real bin_size_um themselves), and for "rect" that unit choice is an exact
+    isotropic scaling (see distance_to_grid_border's docstring), so this is
+    numerically identical to the old hand-rolled version, just no longer
+    duplicating its own copy of the connected-components/border-detection
+    logic.
+    """
+    return bosperrus.distance_to_grid_border(
+        array_row, array_col, bin_size_um=1.0, grid_type="rect",
+    ).to_numpy()
 
 
 def _fit_component(array_row, array_col, n_counts, bin_size_um):

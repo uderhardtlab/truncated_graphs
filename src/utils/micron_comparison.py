@@ -175,26 +175,25 @@ def prepare_microns_data(fn_mat, nbins, alpha, reimann_thresh):
 
 # ── plotting ──────────────────────────────────────────────────────────────────
 def plot_fits_panel(ax, flow, alpha_distances, scores, measure,
-                     scatter_color, fit_color, legend_label_fn,
-                     ylabel, title,
-                     scatter_size, scatter_alpha, scatter_linewidths):
-    """Scatter of `measure`'s centrality score vs. distance to the alpha-shape
-    boundary, overlaid with the fitted piecewise-linear BOSPERRUS curve.
-    `legend_label_fn(measure, b, m, c)` builds the legend text (e.g. to show
-    the fitted elbow value).
+                     fit_color, legend_label_fn, ylabel, title):
+    """2D histogram (via `bosperrus.plot_fit`) of `measure`'s centrality score
+    vs. distance to the alpha-shape boundary, overlaid with the fitted
+    piecewise-linear BOSPERRUS curve. `legend_label_fn(measure, b, m, c)`
+    builds the legend text (e.g. to show the fitted elbow value).
     """
-    d_sorted = np.sort(alpha_distances)
-
     fit = flow.best_fits[measure]
     b = fit.params["piecewise_linear_b"]
     m = fit.params["piecewise_linear_m"]
     c = fit.params["piecewise_linear_c"]
 
-    ax.scatter(alpha_distances / 1e3, scores[measure],
-               s=scatter_size, alpha=scatter_alpha, color=scatter_color,
-               linewidths=scatter_linewidths, rasterized=True)
-    y_fit = bosperrus.PiecewiseLinearFit.piecewise_plateau(d_sorted, b=b, m=m, c=c)
-    ax.plot(d_sorted / 1e3, y_fit, color=fit_color, lw=2, label=legend_label_fn(measure, b, m, c))
+    # plot_fit's predict_fn is evaluated on whatever d_grid it's given -- here
+    # that's in um (matching the displayed axis), so convert back to the nm
+    # scale the fit itself was trained on before calling fit.predict.
+    bosperrus.plot_fit(
+        ax, alpha_distances / 1e3, scores[measure],
+        lambda d_um: fit.predict(np.asarray(d_um) * 1e3),
+        line_kwargs={"color": fit_color, "linewidth": 2, "label": legend_label_fn(measure, b, m, c)},
+    )
     ax.axvline(b / 1e3, color=fit_color, lw=1.2, ls="--", alpha=0.85)
 
     ax.set_yscale("log")
