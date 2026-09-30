@@ -28,16 +28,13 @@ from matplotlib.colors import LinearSegmentedColormap, ListedColormap, to_rgb
 from matplotlib.lines import Line2D
 from scipy.sparse import csr_matrix
 from scipy.sparse.csgraph import connected_components
-from skimage.color import rgb2gray
-from skimage.filters import gaussian, threshold_otsu
-from skimage.morphology import binary_closing, disk, remove_small_holes, remove_small_objects
-from skimage.segmentation import clear_border
 
 import bosperrus
 from bosperrus.fit import ConstantFit, PiecewiseLinearFit, ExponentialSaturationFit
 from bosperrus.pipeline import Flow
 from bosperrus.evaluate_fit import relative_likelihood, scaled_relative_likelihood
 from bosperrus.distances import distance_to_pointset
+from bosperrus.image_masks import segment_tissue_from_rgb
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from blade import peel_sweep
@@ -286,43 +283,6 @@ def load_counts_and_coords(loader_type, h5ad_path, bin_size=20):
             grid = np.round(spatial / bin_size).astype(int)
             array_col, array_row = grid[:, 0], grid[:, 1]
     return n_counts, array_row, array_col, spatial
-
-
-def segment_tissue_from_rgb(image, sigma=8, close_radius=10, min_hole_area=50000, min_object_area=3000):
-    """Simple, uniform tissue-vs-background segmentation for an H&E/CytAssist
-    RGB image: grayscale -> heavy Gaussian blur -> Otsu threshold (tissue is
-    darker than the white/light slide background) -> drop anything touching
-    the image border -> morphological closing + small-hole-filling +
-    small-object removal, to turn the raw threshold into a handful of solid
-    tissue blobs instead of a speckled "nuclei only" mask (a single global
-    Otsu on the *unblurred* grayscale image picks out only the darkest
-    nuclei-dense foci, not the bulk tissue outline, since H&E has a lot of
-    internal texture -- the blur washes that out first).
-
-    clear_border matters for real samples, not just a defensive extra: Pat3's
-    hires image has a faint scan-boundary artifact running almost the entire
-    image perimeter (confirmed: rows/columns 0-15ish read as ~90%+ "tissue"
-    before this step, dropping to baseline by row/col ~20) that Otsu alone
-    reads as tissue -- too large in area for min_object_area to catch (a
-    thin ring spanning a 6000x5200 image easily exceeds a few thousand
-    pixels) but disconnected from the real tissue blobs, so clear_border
-    removes it cleanly without touching them. None of this pipeline's real
-    tissue blobs happen to touch the image edge in the 8 Visium samples this
-    was checked against, so nothing else is lost by this step.
-
-    One fixed parameter set for all samples (not tuned per-sample) --
-    confirmed visually on both a single bulk tissue piece (breast_cancer,
-    solid blob outline recovered cleanly) and ~100 small, closely-spaced TMA
-    cores (breast_cancer_tma, cores stay distinct, none merged or dropped).
-    """
-    gray = rgb2gray(image)
-    blurred = gaussian(gray, sigma=sigma)
-    mask = blurred < threshold_otsu(blurred)
-    mask = clear_border(mask)
-    mask = binary_closing(mask, disk(close_radius))
-    mask = remove_small_holes(mask, area_threshold=min_hole_area)
-    mask = remove_small_objects(mask, min_size=min_object_area)
-    return mask
 
 
 def load_visium_hires_image(h5ad_path, library_id):
