@@ -1,0 +1,13 @@
+name,dataset_type,technology,path,mask_kwargs
+breast_cancer,visium_demo,visium_hd,/home/woody/iwbn/iwbn007h/visium_hd_demo_data/Visium_HD_11mm_Human_Breast_Cancer/binned_outputs,{}
+pancreas,visium_demo,visium_hd,/home/woody/iwbn/iwbn007h/visium_hd_demo_data/Visium_HD_11mm_Human_Pancreas/binned_outputs,{}
+colon_cancer_ff,visium_demo,visium_hd,/home/woody/iwbn/iwbn007h/visium_hd_demo_data/Visium_HD_11mm_Human_Colon_Cancer_Fresh_Frozen/binned_outputs,{}
+breast_cancer_tma,visium_demo,visium_hd,/home/woody/iwbn/iwbn007h/visium_hd_demo_data/Visium_HD_11mm_Human_Breast_Cancer_TMA/binned_outputs,{}
+Pat1,visium_custom,visium_hd,/home/woody/iwbn/iwbn007h/10x_data_3_4/Pat1/Pr416_Pat1/outs/binned_outputs,{}
+Pat2,visium_custom,visium_hd,/home/woody/iwbn/iwbn007h/10x_data/Pr416_Pat2/outs/binned_outputs,{}
+Pat3,visium_custom,visium_hd,/home/woody/iwbn/iwbn007h/10x_data_3_4/Pat3/Pr416_Pat3/outs/binned_outputs,{}
+Pat4,visium_custom,visium_hd,/home/woody/iwbn/iwbn007h/10x_data_3_4/Pat4/Pr416_Pat4/outs/binned_outputs,{}
+A02991D1,stomics_custom,stereo-seq,/home/vault/iwbn/shared/stomics_data_analysis/Patient_1_out/271025_realigned,"{""threshold"": ""multiotsu_top""}"
+A02994C6,stomics_custom,stereo-seq,/home/vault/iwbn/shared/stomics_data_analysis/Patient_2_out/271025_realigned,{}
+Y01087DD,stomics_custom,stereo-seq,/home/vault/iwbn/shared/stomics_data_analysis/Patient_3_out/300626_2nd_exp,{}
+Y01084J8,stomics_custom,stereo-seq,/home/vault/iwbn/shared/stomics_data_analysis/Patient_4_out/300626_2nd_exp,{}
