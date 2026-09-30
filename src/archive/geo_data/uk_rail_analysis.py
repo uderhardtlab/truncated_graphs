@@ -8,12 +8,16 @@ Downloads the entire GB rail network via a single bounding-box query, then:
   - assigns nodes to England / Scotland / Wales via spatial join
   - computes dist_coast and dist_political for every node
   - runs BOSPERRUS for country-level and coastal-county-level sub-networks
-  - saves two figures to result_plots/
+  - saves two figures to result_plots/archive/geo_data/
+
+Archived: moved from src/exploratory/ + result_plots/ into this archive/
+folder - see conversation. ROOT/OUT below are set for this location;
+rerunning from here writes back into this same archive folder.
 
 Outputs
 -------
-result_plots/uk_rail_country_results.png
-result_plots/uk_rail_county_coast_results.png
+result_plots/archive/geo_data/uk_rail_country_results.png
+result_plots/archive/geo_data/uk_rail_county_coast_results.png
 """
 
 import warnings
@@ -33,11 +37,11 @@ import bosperrus
 from bosperrus.centrality_measures import compute_centrality_measures
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
-ROOT  = Path(__file__).resolve().parent.parent.parent
+ROOT  = Path(__file__).resolve().parent.parent.parent.parent  # src/archive/geo_data/
 CACHE = ROOT / "notebooks" / "cache"
-OUT   = ROOT / "result_plots"
+OUT   = ROOT / "result_plots" / "archive" / "geo_data"
 CACHE.mkdir(parents=True, exist_ok=True)
-OUT.mkdir(exist_ok=True)
+OUT.mkdir(parents=True, exist_ok=True)
 
 MEASURES = ["degree", "betweenness", "closeness", "pagerank"]
 

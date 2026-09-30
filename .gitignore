@@ -10,3 +10,7 @@
 # slurm job logs
 jobs/logs/*
 !jobs/logs/.gitkeep
+jobs
+
+results/exploratory
+src/archive

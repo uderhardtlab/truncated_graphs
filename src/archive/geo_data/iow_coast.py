@@ -1,3 +1,12 @@
+import sys
+import pyproj.datadir
+# Work around a pyproj/PROJ mismatch in this pixi env: the loaded libproj.so
+# is conda-forge's (pulled in by graph-tool), but pyproj's own bundled
+# proj.db (from its PyPI wheel) doesn't match its schema, producing
+# "Internal Proj Error: proj_create: no database context specified" on any
+# CRS construction. Pointing pyproj at the conda-forge proj.db fixes it.
+pyproj.datadir.set_data_dir(f"{sys.prefix}/share/proj")
+
 import osmnx as ox
 import geopandas as gpd
 import numpy as np
@@ -8,9 +17,9 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent.parent
-OUT = ROOT / "result_plots"
-OUT.mkdir(exist_ok=True)
+ROOT = Path(__file__).resolve().parent.parent.parent.parent  # src/archive/geo_data/
+OUT = ROOT / "result_plots" / "archive" / "geo_data"
+OUT.mkdir(parents=True, exist_ok=True)
 
 # 1. Download Isle of Wight drive network (cache to graphml to avoid re-download)
 cache = ROOT / "notebooks" / "cache" / "iow_drive.graphml"

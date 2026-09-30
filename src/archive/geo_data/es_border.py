@@ -1,3 +1,12 @@
+import sys
+import pyproj.datadir
+# Work around a pyproj/PROJ mismatch in this pixi env: the loaded libproj.so
+# is conda-forge's (pulled in by graph-tool), but pyproj's own bundled
+# proj.db (from its PyPI wheel) doesn't match its schema, producing
+# "Internal Proj Error: proj_create: no database context specified" on any
+# CRS construction. Pointing pyproj at the conda-forge proj.db fixes it.
+pyproj.datadir.set_data_dir(f"{sys.prefix}/share/proj")
+
 import osmnx as ox
 import geopandas as gpd
 import numpy as np
@@ -10,9 +19,9 @@ from pathlib import Path
 from shapely.ops import unary_union
 import networkx as nx
 
-ROOT = Path(__file__).resolve().parent.parent.parent
-OUT  = ROOT / "result_plots"
-OUT.mkdir(exist_ok=True)
+ROOT = Path(__file__).resolve().parent.parent.parent.parent  # src/archive/geo_data/
+OUT  = ROOT / "result_plots" / "archive" / "geo_data"
+OUT.mkdir(parents=True, exist_ok=True)
 CACHE = ROOT / "notebooks" / "cache"
 CACHE.mkdir(exist_ok=True)
 
@@ -24,7 +33,14 @@ def load_or_download(place, fname, network_type="drive"):
         print(f"Loading cached {fname}")
         return ox.load_graphml(p)
     print(f"Downloading graph for {place} ...")
-    G = ox.graph_from_place(place, network_type=network_type)
+    # graph_from_place() clips to the full-detail admin polygon (Scottish
+    # Borders' boundary alone has ~16.7k vertices, likely from coastline),
+    # which produces an Overpass query heavy enough to trigger gateway
+    # timeouts / connection refusals on the public instance. Simplifying the
+    # polygon first (~100m tolerance, negligible next to the km-scale
+    # distance-to-border values used later) keeps the query light.
+    poly = ox.geocode_to_gdf(place).geometry.iloc[0].simplify(0.001)
+    G = ox.graph_from_polygon(poly, network_type=network_type)
     ox.save_graphml(G, p)
     return G
 
