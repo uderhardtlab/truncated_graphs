@@ -65,6 +65,7 @@ CURVE_FIT_ORDER = ["Piecewise Linear Fit", "Exponential Saturation Fit", "Michae
 # stand-in for each dataset's own d_max, since it isn't stored in the
 # per-graph-type CSVs.
 D_MAX_APPROX = 0.483
+X_AXIS_MAX = 0.5  # displayed x range; curves/densities still stop at D_MAX_APPROX (no extrapolation)
 _EPS = 1e-10
 # narrow gaussian standing in for Constant Fit's zero-variance spike, as a
 # fraction of each margin's own range
@@ -182,7 +183,7 @@ def plot_cell(ax_main, ax_top, ax_right, sub, fit_palette):
         ax_right.plot(spike_y, es_grid, color=fit_palette["Constant Fit"], lw=1)
 
     ax_main.axhline(0, color="#898781", lw=0.7, zorder=0)
-    ax_main.set_xlim(0, D_MAX_APPROX)
+    ax_main.set_xlim(0, X_AXIS_MAX)
     ax_main.set_ylim(-y_abs_max, y_abs_max)
     ax_main.spines[["top", "right"]].set_visible(False)
     ax_main.tick_params(labelsize=6)
