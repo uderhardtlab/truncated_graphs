@@ -17,6 +17,7 @@ native 8um bins; Stereo-seq bin1 pooled 16x16).
 Usage (cwd = truncated_graphs/):
     pixi run python src/utils/st_precompute.py <sample>              # 8um: buffer + diffusion
     pixi run python src/utils/st_precompute.py <sample> --ablation   # diffusion only, all ABLATION_RESOLUTIONS
+    pixi run python src/utils/st_precompute.py <sample> --image-mask # border analysis on raw bins inside the image mask
 
 Writes to results/exploratory/st_reroll/:
     {sample}_filtered_bins.parquet  one row per filtered bin (+ virtual=True rows for filled
@@ -101,7 +102,7 @@ def _nearest_value(row, col, values, query_row, query_col):
     return values[idx]
 
 
-def run_buffer(sample, technology, path):
+def run_buffer(sample, technology, path, adata=None, footprint="pipeline"):
     """identify_analysis_buffer_from_filtered + BLADE (raw and exp-sat
     corrected) per component, both on the same tissue footprint: n_counts > 0
     bins with small enclosed holes (<= MAX_HOLE_AREA_UM2) filled.
@@ -109,10 +110,16 @@ def run_buffer(sample, technology, path):
     Returns the filtered-bins DataFrame -- one row per filtered bin plus one
     row per filled hole position without a bin (virtual=True, n_counts NaN;
     they shape borders/layers but are never fit or tested). Mask coordinates
-    are filled in later by run_main."""
-    _log(f"load_filtered({technology}, {RESOLUTION_UM}um)")
-    adata = bosperrus.load_filtered(path, technology, RESOLUTION_UM)
-    _log(f"  {adata.n_obs:,} filtered bins; identify_analysis_buffer_from_filtered ...")
+    are filled in later by run_main.
+
+    adata: the bins to analyse; by default the pipeline's own tissue-filtered
+    bins (bosperrus.load_filtered: Space Ranger's in_tissue / SAW's
+    tissue.gef). run_image_mask passes the raw bins inside the image mask
+    instead (footprint="image_mask")."""
+    if adata is None:
+        _log(f"load_filtered({technology}, {RESOLUTION_UM}um)")
+        adata = bosperrus.load_filtered(path, technology, RESOLUTION_UM)
+    _log(f"  {adata.n_obs:,} input bins ({footprint}); identify_analysis_buffer_from_filtered ...")
     bosperrus.identify_analysis_buffer_from_filtered(
         adata, min_component_size=MIN_COMPONENT_SPOTS, max_hole_area_um2=MAX_HOLE_AREA_UM2,
     )
@@ -176,7 +183,7 @@ def run_buffer(sample, technology, path):
 
     buffer_json = {
         "sample": sample, "technology": technology, "path": str(path), "resolution_um": RESOLUTION_UM,
-        "min_component_size": MIN_COMPONENT_SPOTS, "max_hole_area_um2": MAX_HOLE_AREA_UM2,
+        "footprint": footprint, "min_component_size": MIN_COMPONENT_SPOTS, "max_hole_area_um2": MAX_HOLE_AREA_UM2,
         "blade_connectivity": BLADE_CONNECTIVITY, "n_filtered_bins": int(adata.n_obs),
         "n_filled_hole_bins": fit_info["n_filled_hole_bins"], "n_hole_positions_without_bin": int(len(v_row)),
         "per_component": per_component,
@@ -262,6 +269,45 @@ def run_main(sample):
     _log(f"wrote {sample} outputs to {OUT_DIR}")
 
 
+def run_image_mask(sample):
+    """Supplementary variant of run_buffer's border analysis: instead of the
+    pipeline's own tissue call (Space Ranger in_tissue / SAW tissue cut), the
+    input bins are the raw 8um bins inside the image-only tissue mask (distance
+    to the mask == 0, exactly the mask used by quantify_diffusion_from_raw;
+    read from the main run's {sample}_diffusion_8um.npz). Everything after that
+    -- n_counts > 0, hole filling, components, elbow, BLADE -- is identical.
+    Writes {sample}_buffer_imagemask.json and {sample}_filtered_bins_imagemask.parquet."""
+    import anndata
+    row = SAMPLES.loc[sample]
+    npz_path = OUT_DIR / f"{sample}_diffusion_{RESOLUTION_UM:g}um.npz"
+    if not npz_path.exists():
+        raise FileNotFoundError(f"{npz_path} missing -- run the main job for {sample} first")
+    raw = np.load(npz_path)
+    inside = raw["distance_um"] == 0
+    obs = pd.DataFrame({
+        "array_row": raw["array_row"][inside].astype(np.int64),
+        "array_col": raw["array_col"][inside].astype(np.int64),
+        "n_counts": raw["n_counts"][inside].astype(np.float64),
+    })
+    obs.index = obs["array_row"].astype(str) + "_" + obs["array_col"].astype(str)
+    adata = anndata.AnnData(obs=obs)
+    adata.uns["bosperrus"] = {"technology": row["technology"], "bin_size_um": RESOLUTION_UM, "path": str(row["path"])}
+    _log(f"{int(inside.sum()):,} raw bins inside the image mask "
+         f"({int((obs['n_counts'] > 0).sum()):,} with counts)")
+
+    filtered, buffer_json = run_buffer(sample, row["technology"], row["path"], adata=adata, footprint="image_mask")
+    # same 8um grid as the npz -> mask coordinates by (array_row, array_col) lookup
+    raw_index = pd.Series(np.arange(len(raw["array_row"])),
+                          index=pd.MultiIndex.from_arrays([raw["array_row"], raw["array_col"]]))
+    idx = raw_index.reindex(pd.MultiIndex.from_arrays([filtered["array_row"], filtered["array_col"]])).to_numpy()
+    idx = idx.astype(np.int64)
+    filtered["mask_row"] = raw["mask_row"][idx].astype(np.float32)
+    filtered["mask_col"] = raw["mask_col"][idx].astype(np.float32)
+    filtered.to_parquet(OUT_DIR / f"{sample}_filtered_bins_imagemask.parquet")
+    (OUT_DIR / f"{sample}_buffer_imagemask.json").write_text(json.dumps(_jsonify(buffer_json), indent=1))
+    _log(f"wrote {sample} image-mask outputs to {OUT_DIR}")
+
+
 def run_ablation(sample):
     row = SAMPLES.loc[sample]
     technology, path, mask_kwargs = row["technology"], row["path"], json.loads(row["mask_kwargs"])
@@ -279,8 +325,12 @@ def run_ablation(sample):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("sample", choices=list(SAMPLES.index))
-    parser.add_argument("--ablation", action="store_true")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--ablation", action="store_true")
+    mode.add_argument("--image-mask", action="store_true",
+                      help="border analysis on the raw bins inside the image mask (needs the main run's npz)")
     args = parser.parse_args()
-    _log(f"=== {args.sample} ({'ablation' if args.ablation else 'main'}) ===")
-    (run_ablation if args.ablation else run_main)(args.sample)
+    name = "ablation" if args.ablation else "image-mask" if args.image_mask else "main"
+    _log(f"=== {args.sample} ({name}) ===")
+    {"ablation": run_ablation, "image-mask": run_image_mask, "main": run_main}[name](args.sample)
     _log("done")
