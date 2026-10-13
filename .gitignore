@@ -14,3 +14,6 @@ jobs
 
 results/exploratory
 src/archive
+# notebook/script caches
+notebooks/cache/
+src/cache/

@@ -1,0 +1,29 @@
+transit_type,scenario,measure,n_nodes,rel_ll,rel_ll_unscaled,effect_strength,best_fit_type
+subway,coast,degree,185,,,0.0,Constant Fit
+subway,coast,betweenness,185,1.0034247875159272,1.8823165261326484,-0.5584493352626727,Piecewise Linear Fit
+subway,coast,closeness,185,1.1213479481341186,1592108463.8836277,0.21627307020851708,Exponential Saturation Fit
+subway,coast,pagerank,185,,,0.0,Constant Fit
+subway,kommune_inside,degree,169,,,0.0,Constant Fit
+subway,kommune_inside,betweenness,169,1.008104578974755,3.9124091663839042,-0.3801603388332157,Piecewise Linear Fit
+subway,kommune_inside,closeness,169,1.0000167674173943,1.0028376884202117,0.1133624283747385,Piecewise Linear Fit
+subway,kommune_inside,pagerank,169,,,0.0,Constant Fit
+subway,kommune_outside,degree,16,,,0.0,Constant Fit
+subway,kommune_outside,betweenness,16,1.0406241469376343,1.891047277767458,0.7548053555159518,Piecewise Linear Fit
+subway,kommune_outside,closeness,16,1.4496606635380573,380.4185379901018,0.1538400425721916,Piecewise Linear Fit
+subway,kommune_outside,pagerank,16,,,0.0,Constant Fit
+subway,kh_all,degree,185,1.0084865854368195,4.77499875069841,0.08876615640275831,Piecewise Linear Fit
+subway,kh_all,betweenness,185,1.0182155993608462,28.20675069824463,0.4537205097985852,Piecewise Linear Fit
+subway,kh_all,closeness,185,1.4092172809689667,3.6385021813304665e+27,0.23694031129188853,Piecewise Linear Fit
+subway,kh_all,pagerank,185,,,0.0,Constant Fit
+subway,kh_inside_kommune,degree,169,1.0051324530647139,2.3754009628099357,0.08321811900364935,Piecewise Linear Fit
+subway,kh_inside_kommune,betweenness,169,1.0150039023027815,12.389201584123992,0.43392985058585604,Piecewise Linear Fit
+subway,kh_inside_kommune,closeness,169,1.4093613411911,1.5303047649925963e+25,0.23030045754903675,Piecewise Linear Fit
+subway,kh_inside_kommune,pagerank,169,,,0.0,Constant Fit
+subway,indreby_all,degree,185,1.0171026762524464,23.040264187174124,0.13775636333862257,Piecewise Linear Fit
+subway,indreby_all,betweenness,185,1.0039985263308453,2.092275839679622,0.3220106341158387,Piecewise Linear Fit
+subway,indreby_all,closeness,185,1.2643241138128323,6.979236299232521e+18,0.25007880516461983,Piecewise Linear Fit
+subway,indreby_all,pagerank,185,,,0.0,Constant Fit
+subway,indreby_inside_kommune,degree,169,1.0140391036013987,10.549812790597437,0.12843184531441004,Piecewise Linear Fit
+subway,indreby_inside_kommune,betweenness,169,1.0002117504985208,1.0364299277722617,0.28853104523781653,Piecewise Linear Fit
+subway,indreby_inside_kommune,closeness,169,1.2403009358001176,6398454146032613.0,0.23879571243972322,Piecewise Linear Fit
+subway,indreby_inside_kommune,pagerank,169,,,0.0,Constant Fit

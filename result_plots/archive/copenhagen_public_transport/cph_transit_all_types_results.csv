@@ -1,0 +1,85 @@
+transit_type,scenario,measure,n_nodes,rel_ll,rel_ll_unscaled,effect_strength,best_fit_type
+rail,coast,degree,1166,1.003385203585452,51.443363842521144,0.08654240324145496,Piecewise Linear Fit
+rail,coast,betweenness,1166,1.0099881050581705,107834.56364383265,-0.46749625909810116,Piecewise Linear Fit
+rail,coast,closeness,1166,1.0061879875591093,1330.03614510608,-1.467112359191946,Piecewise Linear Fit
+rail,coast,pagerank,1166,,,0.0,Constant Fit
+rail,kommune_inside,degree,530,1.0058984254733585,22.578132936948123,0.1325424848912395,Piecewise Linear Fit
+rail,kommune_inside,betweenness,530,1.031717192297097,15386995.260905348,-1.0438921630741067,Piecewise Linear Fit
+rail,kommune_inside,closeness,530,1.0057720372124466,21.123469063130923,28.608954366511934,Exponential Saturation Fit
+rail,kommune_inside,pagerank,530,1.0029824936490346,4.847044144397644,0.06699442962394728,Piecewise Linear Fit
+rail,kommune_outside,degree,636,1.0082060698063375,180.86716075563064,0.16439465825690505,Exponential Saturation Fit
+rail,kommune_outside,betweenness,636,1.046740493913478,4145913254471.6523,0.7849473272823874,Exponential Saturation Fit
+rail,kommune_outside,closeness,636,1.0106494416087066,843.2254057609139,-0.8336452811627688,Piecewise Linear Fit
+rail,kommune_outside,pagerank,636,,,0.0,Constant Fit
+rail,kh_all,degree,1166,1.005281602525949,465.0489216064984,0.1847513484297719,Michaelis-Menten Fit
+rail,kh_all,betweenness,1166,1.0018348431054152,8.477933270676077,-0.35202360129208643,Piecewise Linear Fit
+rail,kh_all,closeness,1166,1.008779911362716,26707.410553607962,0.36906602353239043,Piecewise Linear Fit
+rail,kh_all,pagerank,1166,,,0.0,Constant Fit
+rail,kh_inside_kommune,degree,530,1.0326009892021912,24223923.100106973,0.16881784681610862,Piecewise Linear Fit
+rail,kh_inside_kommune,betweenness,530,1.0093880483176871,141.52195580445184,-0.616966506313616,Piecewise Linear Fit
+rail,kh_inside_kommune,closeness,530,1.014395029272467,1948.8103676947517,-0.9270232340289631,Piecewise Linear Fit
+rail,kh_inside_kommune,pagerank,530,,,0.0,Constant Fit
+rail,indreby_all,degree,1166,1.0052613666642247,454.26072691585347,0.14917664230312463,Exponential Saturation Fit
+rail,indreby_all,betweenness,1166,1.0010570972638337,3.4278196631490756,-0.3305894419778982,Piecewise Linear Fit
+rail,indreby_all,closeness,1166,1.0016364048315711,6.729417351878453,0.2219838631004566,Piecewise Linear Fit
+rail,indreby_all,pagerank,1166,,,0.0,Constant Fit
+rail,indreby_inside_kommune,degree,530,1.0284546787235427,2871665.6226291996,0.16700732361942988,Piecewise Linear Fit
+rail,indreby_inside_kommune,betweenness,530,1.0139415556444311,1537.6199616472786,-1.0051250809396663,Michaelis-Menten Fit
+rail,indreby_inside_kommune,closeness,530,1.0307186634300984,9210308.699989216,-1.8641508799384827,Piecewise Linear Fit
+rail,indreby_inside_kommune,pagerank,530,,,0.0,Constant Fit
+light_rail,coast,degree,679,1.001001954127781,1.9738505957551609,0.05000432008216709,Piecewise Linear Fit
+light_rail,coast,betweenness,679,1.0159065414633177,45050.627949061636,0.4381171710059693,Piecewise Linear Fit
+light_rail,coast,closeness,679,1.0097703766247164,736.4832790751053,-0.4459891732982199,Exponential Saturation Fit
+light_rail,coast,pagerank,679,,,0.0,Constant Fit
+light_rail,kommune_inside,degree,151,1.062510706005367,9469.575874033473,0.15476097256439866,Piecewise Linear Fit
+light_rail,kommune_inside,betweenness,151,1.0036463767427468,1.7325624004364342,-0.9921128692872231,Piecewise Linear Fit
+light_rail,kommune_inside,closeness,151,1.045233300244518,796.524001495056,0.08953211281888175,Michaelis-Menten Fit
+light_rail,kommune_inside,pagerank,151,1.0196726860938239,18.948668241232145,0.08827356756513731,Piecewise Linear Fit
+light_rail,kommune_outside,degree,528,1.0007489105659497,1.48479510129599,0.06071859076955942,Piecewise Linear Fit
+light_rail,kommune_outside,betweenness,528,1.0036080933459033,6.696899714785535,0.36581310073899775,Michaelis-Menten Fit
+light_rail,kommune_outside,closeness,528,1.0323650070886286,20135822.538087495,0.5503652922172925,Piecewise Linear Fit
+light_rail,kommune_outside,pagerank,528,,,0.0,Constant Fit
+light_rail,kh_all,degree,679,1.0078200199267775,198.1728817548139,0.09995475646348524,Michaelis-Menten Fit
+light_rail,kh_all,betweenness,679,1.0709529178175443,1.637144230197835e+20,0.6237246864879482,Piecewise Linear Fit
+light_rail,kh_all,closeness,679,1.0100483787602892,887.8455602502249,0.433516074901707,Michaelis-Menten Fit
+light_rail,kh_all,pagerank,679,,,0.0,Constant Fit
+light_rail,kh_inside_kommune,degree,151,1.008704205853853,3.7011661287256925,0.0873013721296462,Piecewise Linear Fit
+light_rail,kh_inside_kommune,betweenness,151,,,0.0,Constant Fit
+light_rail,kh_inside_kommune,closeness,151,1.1264067996708416,63971242.185950726,0.09497738932574634,Michaelis-Menten Fit
+light_rail,kh_inside_kommune,pagerank,151,,,0.0,Constant Fit
+light_rail,indreby_all,degree,679,1.0068440761821864,102.64713867195323,0.09209873729535666,Michaelis-Menten Fit
+light_rail,indreby_all,betweenness,679,1.0738420729633686,1.0198637568908759e+21,0.7059755851768007,Exponential Saturation Fit
+light_rail,indreby_all,closeness,679,1.003834118066126,13.44205305632862,-0.2765552117723392,Piecewise Linear Fit
+light_rail,indreby_all,pagerank,679,,,0.0,Constant Fit
+light_rail,indreby_inside_kommune,degree,151,,,0.0,Constant Fit
+light_rail,indreby_inside_kommune,betweenness,151,1.0019341945414701,1.3388101687593787,0.33974687959410077,Michaelis-Menten Fit
+light_rail,indreby_inside_kommune,closeness,151,1.1964614613698912,579036397423.0051,0.11780346769523226,Michaelis-Menten Fit
+light_rail,indreby_inside_kommune,pagerank,151,,,0.0,Constant Fit
+subway,coast,degree,185,,,0.0,Constant Fit
+subway,coast,betweenness,185,1.0034247875159272,1.8823165261326484,-0.5584493352626727,Piecewise Linear Fit
+subway,coast,closeness,185,1.1213479481341186,1592108463.8836277,0.21627307020851708,Exponential Saturation Fit
+subway,coast,pagerank,185,,,0.0,Constant Fit
+subway,kommune_inside,degree,169,,,0.0,Constant Fit
+subway,kommune_inside,betweenness,169,1.008104578974755,3.9124091663839042,-0.3801603388332157,Piecewise Linear Fit
+subway,kommune_inside,closeness,169,1.0000167674173943,1.0028376884202117,0.1133624283747385,Piecewise Linear Fit
+subway,kommune_inside,pagerank,169,,,0.0,Constant Fit
+subway,kommune_outside,degree,16,,,0.0,Constant Fit
+subway,kommune_outside,betweenness,16,1.0406241469376343,1.891047277767458,0.7548053555159518,Piecewise Linear Fit
+subway,kommune_outside,closeness,16,1.4496606635380573,380.4185379901018,0.1538400425721916,Piecewise Linear Fit
+subway,kommune_outside,pagerank,16,,,0.0,Constant Fit
+subway,kh_all,degree,185,1.0084865854368195,4.77499875069841,0.08876615640275831,Piecewise Linear Fit
+subway,kh_all,betweenness,185,1.0182155993608462,28.20675069824463,0.4537205097985852,Piecewise Linear Fit
+subway,kh_all,closeness,185,1.4092172809689667,3.6385021813304665e+27,0.23694031129188853,Piecewise Linear Fit
+subway,kh_all,pagerank,185,,,0.0,Constant Fit
+subway,kh_inside_kommune,degree,169,1.0051324530647139,2.3754009628099357,0.08321811900364935,Piecewise Linear Fit
+subway,kh_inside_kommune,betweenness,169,1.0150039023027815,12.389201584123992,0.43392985058585604,Piecewise Linear Fit
+subway,kh_inside_kommune,closeness,169,1.4093613411911,1.5303047649925963e+25,0.23030045754903675,Piecewise Linear Fit
+subway,kh_inside_kommune,pagerank,169,,,0.0,Constant Fit
+subway,indreby_all,degree,185,1.0171026762524464,23.040264187174124,0.13775636333862257,Piecewise Linear Fit
+subway,indreby_all,betweenness,185,1.0039985263308453,2.092275839679622,0.3220106341158387,Piecewise Linear Fit
+subway,indreby_all,closeness,185,1.2643241138128323,6.979236299232521e+18,0.25007880516461983,Piecewise Linear Fit
+subway,indreby_all,pagerank,185,,,0.0,Constant Fit
+subway,indreby_inside_kommune,degree,169,1.0140391036013987,10.549812790597437,0.12843184531441004,Piecewise Linear Fit
+subway,indreby_inside_kommune,betweenness,169,1.0002117504985208,1.0364299277722617,0.28853104523781653,Piecewise Linear Fit
+subway,indreby_inside_kommune,closeness,169,1.2403009358001176,6398454146032613.0,0.23879571243972322,Piecewise Linear Fit
+subway,indreby_inside_kommune,pagerank,169,,,0.0,Constant Fit
