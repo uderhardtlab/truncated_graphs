@@ -25,13 +25,15 @@
 # here lets far more of the 100 tasks run concurrently instead of each one
 # starving 90%+ of a monopolized node during single-threaded fitting. `work`
 # is also this cluster's default partition, so it's left unspecified below.
+# 2026-10-16 rerun (job 1558334) took 0:47-1:35 per task, so 6 tasks hit 1:30. The current version adds
+# a delaunay_pruned row and one extra log-variant fit per measure, so --time is now 4 h.
 # Submit from anywhere with (on tinyfat, no GPU needed):
 #   sbatch.tinyfat jobs/figure5_sphere.sbatch
 #SBATCH --job-name=figure5-sphere
 #SBATCH --array=0-99
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=12G
-#SBATCH --time=01:30:00
+#SBATCH --time=04:00:00
 #SBATCH --output=jobs/logs/figure5_%A_%a.out
 #SBATCH --error=jobs/logs/figure5_%A_%a.err
 
@@ -41,4 +43,4 @@ set -euo pipefail
 # directory, not its original location -- use SLURM's own submit-dir variable.
 cd "$SLURM_SUBMIT_DIR/src"
 echo "Running 1 sphere.py repetition (task $SLURM_ARRAY_TASK_ID) on $(hostname) with $SLURM_CPUS_PER_TASK cpus"
-pixi run python figure5/sphere.py --n-runs 1
+pixi run python figure5/sphere.py --n-runs 1 --seed "$SLURM_ARRAY_TASK_ID"

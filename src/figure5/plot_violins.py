@@ -1,8 +1,10 @@
 """
-Figure 5: violin plots comparing raw / bosperrus-corrected / SERN-corrected
-centrality correlations against the uncropped ("original") sphere benchmark.
-One figure per correlation method (Pearson, Spearman) -- see sphere.py's
-CORRELATION_METHODS.
+Figure 5: violin plots comparing raw / bosperrus-corrected (additive,
+multiplicative and log, see sphere.py) / SERN-corrected centrality correlations against the uncropped
+("original") sphere benchmark. One figure per correlation method (Pearson,
+Spearman) -- see sphere.py's CORRELATION_METHODS -- and node subset ("all"
+crop nodes; "affected" = nearest quartile to the border, written as a
+separate figure with an "_affected" suffix).
 
 Run:
     cd truncated_graphs/
@@ -21,21 +23,29 @@ from scipy.stats import mannwhitneyu
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 
-METHOD_PALETTE = {"raw": "grey", "bosperrus": "#8ABBD6", "SERN": "#E59EDD"}
-METHOD_ORDER = ["raw", "bosperrus", "SERN"]
-ROW_ORDER = ["delaunay", "knn", "rnn"]
-ROW_LABELS = {"delaunay": "Delaunay", "knn": "$k$-NN", "rnn": "$r$-NN"}
+METHOD_PALETTE = {"raw": "grey", "bosperrus": "#8ABBD6", "bosperrus_mult": "#3A7DB0", "bosperrus_log": "#1B3F66",
+                  "SERN": "#E59EDD"}
+METHOD_ORDER = ["raw", "bosperrus", "bosperrus_mult", "bosperrus_log", "SERN"]
+METHOD_LABELS = {"raw": "raw", "bosperrus": "bosperrus add.", "bosperrus_mult": "bosperrus mult.",
+                 "bosperrus_log": "bosperrus log", "SERN": "SERN"}
+ROW_ORDER = ["delaunay", "delaunay_pruned", "knn", "rnn"]
+ROW_LABELS = {"delaunay": "Delaunay", "delaunay_pruned": "Delaunay\n(pruned)", "knn": "$k$-NN", "rnn": "$r$-NN"}
 CORR_LABEL = {"pearson": "Pearson $r$", "spearman": "Spearman $\\rho$"}
 FIG_WIDTH = 9  # this manuscript's full text width (matches figure3.svg)
 
-# Adjacent/spanning pairs, ordered (worse, better) by assumed correction
-# quality; the MWU test below is one-sided on this ordering, since we only
-# care whether the second method's correlations are significantly *larger*.
+# Pairs (a, b, x_a, x_b, bracket height, MWU alternative). Pairs ordered
+# (worse, better) by assumed correction quality are one-sided ("less": is b's
+# correlation significantly *larger* than a's?); additive vs. multiplicative
+# and additive vs. log have no assumed order, so they are two-sided.
 SIG_PAIRS = [
-    ("raw", "bosperrus", 0, 1, 1.04),   # adjacent, lowest bracket
-    ("bosperrus", "SERN", 1, 2, 1.11),  # adjacent
-    ("raw", "SERN",       0, 2, 1.19),  # spanning, highest bracket
+    ("raw", "bosperrus",            0, 1, 1.04, "less"),
+    ("bosperrus_log", "SERN",       3, 4, 1.04, "less"),
+    ("bosperrus", "bosperrus_mult", 1, 2, 1.14, "two-sided"),
+    ("bosperrus", "bosperrus_log",  1, 3, 1.24, "two-sided"),
+    ("raw", "bosperrus_log",        0, 3, 1.34, "less"),
+    ("raw", "SERN",                 0, 4, 1.44, "less"),
 ]
+METHODS = METHOD_ORDER
 N_SAMPLE = 200
 
 
@@ -67,24 +77,31 @@ def load_data():
     all_dfs = all_dfs.rename(columns={
         "original vs. on crop": "raw",
         "original vs. BOSPERRUS corrected on crop": "bosperrus",
+        "original vs. BOSPERRUS multiplicative on crop": "bosperrus_mult",
+        "original vs. BOSPERRUS log on crop": "bosperrus_log",
         "original vs. SERN corrected on crop": "SERN",
     })
     all_dfs["radius"] = all_dfs["radius"].fillna(0)
+    # r-NN r = 0.05 is excluded from figure 5 (fragmented crop graph; see sphere.py), also for runs
+    # made before it was removed from sphere.py
+    all_dfs = all_dfs[~((all_dfs["graph_type"] == "rnn") & np.isclose(all_dfs["radius"], 0.05))]
     all_dfs["k"] = all_dfs["k"].fillna(0)
 
-    for col in ("bosperrus", "SERN", "raw"):
+    if "node_subset" not in all_dfs:
+        all_dfs["node_subset"] = "all"
+    for col in METHODS:
         all_dfs[col] = np.abs(all_dfs[col])
 
     all_dfs = all_dfs.reset_index(drop=True)
-    all_dfs = all_dfs.iloc[all_dfs[["bosperrus", "SERN", "raw"]].dropna(how="all").index]
+    all_dfs = all_dfs.iloc[all_dfs[METHODS].dropna(how="all").index]
     return all_dfs
 
 
-def make_violin_plot(all_dfs, corr_method, out_dir):
-    df_method = all_dfs[all_dfs["corr_method"] == corr_method]
+def make_violin_plot(all_dfs, corr_method, out_dir, node_subset="all"):
+    df_method = all_dfs[(all_dfs["corr_method"] == corr_method) & (all_dfs["node_subset"] == node_subset)]
     df_long = df_method.melt(
         id_vars=["measure", "graph_type", "coord_type"],
-        value_vars=["raw", "bosperrus", "SERN"],
+        value_vars=METHODS,
         var_name="method",
         value_name="correlation",
     ).dropna(subset=["correlation"])
@@ -119,7 +136,8 @@ def make_violin_plot(all_dfs, corr_method, out_dir):
     for ax_row, row_key in zip(g.axes[:, 0], ROW_ORDER):
         ax_row.set_ylabel(f"{ROW_LABELS[row_key]}\n{CORR_LABEL[corr_method]}")
     for ax in g.axes[-1]:
-        plt.setp(ax.get_xticklabels(), rotation=30, ha="right", fontsize=9)
+        ax.set_xticks(range(len(METHOD_ORDER)))
+        ax.set_xticklabels([METHOD_LABELS[m] for m in METHOD_ORDER], rotation=40, ha="right", fontsize=8)
 
     # Paired lines + one-sided MWU significance brackets per facet
     rng = np.random.default_rng(42)
@@ -129,7 +147,7 @@ def make_violin_plot(all_dfs, corr_method, out_dir):
             subset = df_method[
                 (df_method["graph_type"] == row_key) &
                 (df_method["measure"] == col_key)
-            ][["raw", "bosperrus", "SERN"]]
+            ][METHODS]
 
             # --- paired lines (sampled subset for readability) ---
             s = subset.dropna(how="all")
@@ -139,7 +157,7 @@ def make_violin_plot(all_dfs, corr_method, out_dir):
             xs_all, ys_all = [], []
             for _, row_data in sample.iterrows():
                 pts = [(i, v) for i, v in enumerate(
-                    [row_data["raw"], row_data["bosperrus"], row_data["SERN"]]
+                    [row_data[m] for m in METHODS]
                 ) if not np.isnan(v)]
                 if len(pts) >= 2:
                     xs_all.extend([p[0] for p in pts] + [np.nan])
@@ -150,16 +168,17 @@ def make_violin_plot(all_dfs, corr_method, out_dir):
 
             # --- one-sided MWU significance brackets: is the second method's
             # correlation significantly *larger* than the first's? ---
-            for a, b, x1, x2, y in SIG_PAIRS:
+            for a, b, x1, x2, y, alternative in SIG_PAIRS:
                 va = subset[a].dropna()
                 vb = subset[b].dropna()
                 if len(va) > 1 and len(vb) > 1:
-                    _, p = mannwhitneyu(va, vb, alternative="less")
+                    _, p = mannwhitneyu(va, vb, alternative=alternative)
                     _draw_bracket(ax, x1, x2, y, _get_stars(p))
 
-    g.set(ylim=(-0.05, 1.33))
+    g.set(ylim=(-0.05, 1.58), yticks=[0, 0.5, 1])
     g.figure.tight_layout()
-    out = out_dir / f"correlations_violin_{corr_method}.pdf"
+    suffix = "" if node_subset == "all" else f"_{node_subset}"
+    out = out_dir / f"correlations_violin_{corr_method}{suffix}.pdf"
     g.figure.savefig(out, bbox_inches="tight")
     print(f"Saved {out}")
     plt.close(g.figure)
@@ -170,7 +189,8 @@ def main():
     out_dir = ROOT / "result_plots" / "figure5"
     out_dir.mkdir(parents=True, exist_ok=True)
     for corr_method in ["pearson", "spearman"]:
-        make_violin_plot(all_dfs, corr_method, out_dir)
+        for node_subset in sorted(all_dfs["node_subset"].unique()):
+            make_violin_plot(all_dfs, corr_method, out_dir, node_subset=node_subset)
 
 
 if __name__ == "__main__":

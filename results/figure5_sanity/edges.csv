@@ -1,0 +1,3 @@
+coords,n_stereo,n_circumcircle,identical,n_hull,hull_edges_dropped,edges_added
+uniform,10545,10545,True,10572,27,0
+kappa=1,12568,12568,True,12591,23,0
