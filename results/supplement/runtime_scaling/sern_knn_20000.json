@@ -1,0 +1,20 @@
+{
+ "method": "sern",
+ "graph": "knn",
+ "n": 20000,
+ "k": 10,
+ "n_surrogates": 400,
+ "seed": 0,
+ "out_dir": "../results/supplement/runtime_scaling",
+ "cores": 128,
+ "host": "tf066",
+ "cpu": "x86_64",
+ "slurm_job": "1561675",
+ "status": "done",
+ "t_graph": 0.30462318399804644,
+ "n_edges": 200000,
+ "t_total": 1851.8244069669963,
+ "peak_node_delta_bytes": 238326398976,
+ "peak_main_bytes": 6010134528,
+ "peak_mem_bytes": 238326398976
+}

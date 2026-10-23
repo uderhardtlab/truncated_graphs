@@ -1,0 +1,41 @@
+{
+ "method": "bosperrus",
+ "graph": "knn",
+ "n": 20000,
+ "k": 10,
+ "n_surrogates": 400,
+ "seed": 0,
+ "out_dir": "../results/supplement/runtime_scaling",
+ "cores": 128,
+ "host": "tf066",
+ "cpu": "x86_64",
+ "slurm_job": "1561661",
+ "status": "done",
+ "t_graph": 0.29314375900139567,
+ "n_edges": 200000,
+ "t_centrality": {
+  "degree": 0.2467457189995912,
+  "pagerank": 0.49176036499557085,
+  "betweenness": 5.642311136005446,
+  "closeness": 1.4438312399943243,
+  "clustering": 0.28211887599900365
+ },
+ "t_fit": {
+  "degree": 0.6498151830019196,
+  "pagerank": 0.4440640470056678,
+  "betweenness": 0.6487068530041142,
+  "closeness": 0.46089209400088293,
+  "clustering": 0.4866430339970975
+ },
+ "best_fit": {
+  "degree": "PiecewiseLinearFit",
+  "pagerank": "PiecewiseLinearFit",
+  "betweenness": "PiecewiseLinearFit",
+  "closeness": "PiecewiseLinearFit",
+  "clustering": "ExponentialSaturationFit"
+ },
+ "t_total": 10.798107276001247,
+ "peak_node_delta_bytes": 1584660480,
+ "peak_main_bytes": 1262776320,
+ "peak_mem_bytes": 1584660480
+}
