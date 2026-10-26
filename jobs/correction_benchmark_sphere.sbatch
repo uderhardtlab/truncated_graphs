@@ -28,6 +28,8 @@
 # 2026-10-16 rerun (job 1558334) took 0:47-1:35 per task, so 6 tasks hit 1:30. The current version adds
 # a delaunay_pruned row and one extra log-variant fit per measure, so --time is now 4 h.
 # 2026-10-19: SERN raised to 400 surrogates; seed 0 alone took 3:43 on 4 cores, so --time is now 8 h.
+# 2026-10-26: linear/spline detrending baselines added (cheap); previous output archived in
+# results/archive/correction_benchmark_pre_detrend/.
 # Submit from anywhere with (on tinyfat, no GPU needed):
 #   sbatch.tinyfat jobs/correction_benchmark_sphere.sbatch
 #SBATCH --job-name=figure5-sphere

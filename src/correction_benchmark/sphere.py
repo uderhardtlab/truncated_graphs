@@ -11,6 +11,10 @@ BOSPERRUS correction variants (all post-processing here; the package stays addit
                                 (median of the positive S if that is 0); always defined for S >= 0
 P is recovered from BOSPERRUS's own output as P = S_add - S + f(d).
 
+Detrending baselines (no saturation model): S - h(d) + median(S), with h a least-squares line
+("linear") or a penalised cubic regression spline (P-spline, 40 equally spaced knots,
+second-difference penalty, lambda chosen by GCV) ("spline") of S vs. d.
+
 Graphs are recomputed on the crop, as when a proximity graph is built on an imaged region.
 Delaunay on the crop uses a stereographic projection from the cap's antipode, i.e. the spherical
 Delaunay without the hull facets that triangulate the empty hole (see plot_delaunay_cap.py).
@@ -23,6 +27,7 @@ evaluation now delegate to the bosperrus package via the Flow class.
 
 import numpy as np
 import pandas as pd
+from scipy.interpolate import BSpline
 from scipy.spatial import ConvexHull, Delaunay
 from scipy.stats import pearsonr, spearmanr, vonmises_fisher
 
@@ -40,6 +45,7 @@ os.environ["OMP_NUM_THREADS"] = "8"
 # Rheinwalt et al. 2012 use 1000 surrogates, but their Fig. 2 shows reliability
 # barely improves after ~400 -- the cheapest size their own analysis supports
 NUMBER_OF_SERNS = 400
+RUN_SERN = True  # --no-sern: skip the surrogates (SERN columns NaN), e.g. to add cheap methods to an existing run
 N_JOBS = -1  # joblib: use all available cores on whatever machine this runs on
 N_OF_RUNS = 100
 
@@ -156,6 +162,7 @@ def median_scale(S):
 
 
 LOG_SCALES = {"log": median_scale}
+DETREND_KINDS = ["linear", "spline"]
 
 
 def log_correction(distances, S, s):
@@ -164,6 +171,42 @@ def log_correction(distances, S, s):
                                         scores=pd.DataFrame({"y": np.log1p(S.to_numpy(float) / s)}))
     bf.flow(score_names=["y"])
     return pd.Series(s * np.expm1(bf.observations["BOSPERRUS corrected y"].to_numpy()), index=S.index)
+
+
+def pspline_gcv(x, y, n_knots=40, lams=np.logspace(-2, 8, 51), return_path=False):
+    """Cubic P-spline (equally spaced knots, second-difference penalty) with lambda minimising GCV.
+
+    Used instead of scipy's make_smoothing_spline, whose GCV search down to lambda -> 0 fails
+    ("ill-posed") for thousands of closely spaced distances. For lambda > 0 the system is positive definite.
+    n_knots = 40 is an uncritical choice (the penalty sets the smoothness; cf. Ruppert 2002's min(n_unique/4, 35)).
+    return_path: also return a DataFrame of lambda, edf, GCV and the coefficients per lambda.
+    """
+    t = np.r_[[x.min()] * 3, np.linspace(x.min(), x.max(), n_knots), [x.max()] * 3]
+    B = BSpline.design_matrix(x, t, 3).toarray()
+    D = np.diff(np.eye(B.shape[1]), 2, axis=0)
+    BtB, Bty, P = B.T @ B, B.T @ y, D.T @ D
+    path = []
+    for lam in lams:
+        A = BtB + lam * P
+        c = np.linalg.solve(A, Bty)
+        edf = np.trace(np.linalg.solve(A, BtB))
+        gcv = len(y) * np.sum((y - B @ c) ** 2) / (len(y) - edf) ** 2
+        path.append({"lam": lam, "edf": edf, "gcv": gcv, "coef": c})
+    path = pd.DataFrame(path)
+    spline = BSpline(t, path.loc[path["gcv"].idxmin(), "coef"], 3)
+    return (spline, path) if return_path else spline
+
+
+def detrend_correction(distances, S, kind):
+    """S - h(d) + median(S), h fitted to the finite S: a line ("linear") or a GCV P-spline ("spline")."""
+    d = distances.to_numpy(float)
+    y = S.to_numpy(float)
+    ok = np.isfinite(y)
+    if kind == "linear":
+        h = np.polyval(np.polyfit(d[ok], y[ok], 1), d)
+    else:
+        h = pspline_gcv(d[ok], y[ok])(d)
+    return pd.Series(y - h + np.nanmedian(y), index=S.index)
 
 
 def get_bosperrus_corrections(crop_coords, edges, measures, distances, log_scales=None):
@@ -185,6 +228,8 @@ def get_bosperrus_corrections(crop_coords, edges, measures, distances, log_scale
         S = bf.observations[m].astype(float)
         for name, scale_fn in log_scales.items():
             bf.observations[f"BOSPERRUS {name} {m}"] = log_correction(distances, S, scale_fn(S))
+        for kind in DETREND_KINDS:
+            bf.observations[f"{kind} detrended {m}"] = detrend_correction(bf.observations["distance_to_cap"], S, kind)
     bf.observations["degree"] = bf.observations["degree"].astype(int)
     return bf.observations
 
@@ -237,7 +282,10 @@ def process_coords(coords, edge_type, cap_radii, k=None, r=None, rng=None):
 
         local_edges = get_edge_list(crop_coords, edge_type, k=k, r=r, pole=-center)
         BOSPERRUS_results = get_bosperrus_corrections(crop_coords, local_edges, measures, distances)
-        sern_median = get_sern_median(crop_coords, local_edges, measures)
+        if RUN_SERN:
+            sern_median = get_sern_median(crop_coords, local_edges, measures)
+        else:
+            sern_median = pd.DataFrame(np.nan, index=range(len(crop_coords)), columns=measures)
 
         # A measure that succeeded on the global graph can still fail on this
         # particular local crop (e.g. pagerank on a disconnected/edgeless
@@ -255,6 +303,10 @@ def process_coords(coords, edge_type, cap_radii, k=None, r=None, rng=None):
                 "BOSPERRUS_corrections": BOSPERRUS_results[[f"BOSPERRUS corrected {m}" for m in cap_measures]].sort_index(axis=0).sort_index(axis=1),
                 "BOSPERRUS_multiplicative": BOSPERRUS_results[[f"BOSPERRUS multiplicative {m}" for m in cap_measures]].sort_index(axis=0).sort_index(axis=1),
                 "BOSPERRUS_log": BOSPERRUS_results[[f"BOSPERRUS log {m}" for m in cap_measures]].sort_index(axis=0).sort_index(axis=1),
+                **{
+                    f"{kind}_detrended": BOSPERRUS_results[[f"{kind} detrended {m}" for m in cap_measures]].sort_index(axis=0).sort_index(axis=1)
+                    for kind in DETREND_KINDS
+                },
                 "sern": sern_median[cap_measures].sort_index(axis=0).sort_index(axis=1),
                 "sern_corrected": (
                     BOSPERRUS_results[cap_measures].sort_index(axis=0).sort_index(axis=1)
@@ -286,7 +338,7 @@ def process_coords(coords, edge_type, cap_radii, k=None, r=None, rng=None):
         for corr_name, corr_fn in CORRELATION_METHODS.items():
             for subset_name, subset_mask in node_subsets.items():
                 sub = results[subset_mask]
-                rows = {k: [] for k in ["crop", "corrected", "mult", "log", "sern", "crop_sern", "n_excluded"]}
+                rows = {k: [] for k in ["crop", "corrected", "mult", "log", *DETREND_KINDS, "sern", "crop_sern", "n_excluded"]}
 
                 for m in cap_measures:
                     cols = {
@@ -294,14 +346,18 @@ def process_coords(coords, edge_type, cap_radii, k=None, r=None, rng=None):
                         "corrected": sub["BOSPERRUS_corrections"][f"BOSPERRUS corrected {m}"],
                         "mult": sub["BOSPERRUS_multiplicative"][f"BOSPERRUS multiplicative {m}"],
                         "log": sub["BOSPERRUS_log"][f"BOSPERRUS log {m}"],
+                        **{kind: sub[f"{kind}_detrended"][f"{kind} detrended {m}"] for kind in DETREND_KINDS},
                         "sern": sub["sern_corrected"][m], "sern_values": sub["sern"][m],
                     }
                     # same nodes for every method: the multiplicative variant is NaN where f(d) <= 0,
                     # and closeness can be NaN for isolated nodes
-                    ok = np.logical_and.reduce([np.isfinite(c.to_numpy(float)) for c in cols.values()])
-                    for key in ["crop", "corrected", "mult", "log", "sern"]:
+                    # (without SERN, its all-NaN columns are left out of the mask)
+                    ok = np.logical_and.reduce([np.isfinite(c.to_numpy(float)) for key, c in cols.items()
+                                                if RUN_SERN or key not in ("sern", "sern_values")])
+                    for key in ["crop", "corrected", "mult", "log", *DETREND_KINDS]:
                         rows[key].append(_corr(corr_fn, cols["original"], cols[key], ok))
-                    rows["crop_sern"].append(_corr(corr_fn, cols["crop"], cols["sern_values"], ok))
+                    rows["sern"].append(_corr(corr_fn, cols["original"], cols["sern"], ok) if RUN_SERN else np.nan)
+                    rows["crop_sern"].append(_corr(corr_fn, cols["crop"], cols["sern_values"], ok) if RUN_SERN else np.nan)
                     rows["n_excluded"].append(int((~ok).sum()))
 
                 correlations = pd.DataFrame(index=cap_measures)
@@ -309,6 +365,8 @@ def process_coords(coords, edge_type, cap_radii, k=None, r=None, rng=None):
                 correlations["original vs. BOSPERRUS corrected on crop"] = rows["corrected"]
                 correlations["original vs. BOSPERRUS multiplicative on crop"] = rows["mult"]
                 correlations["original vs. BOSPERRUS log on crop"] = rows["log"]
+                for kind in DETREND_KINDS:
+                    correlations[f"original vs. {kind} detrended on crop"] = rows[kind]
                 correlations["original vs. SERN corrected on crop"] = rows["sern"]
                 correlations["on crop vs. SERN values"] = rows["crop_sern"]
                 correlations["n_excluded"] = rows["n_excluded"]
@@ -322,9 +380,10 @@ def process_coords(coords, edge_type, cap_radii, k=None, r=None, rng=None):
     return pd.concat(all_correlations)
 
 
-def main(n_runs=N_OF_RUNS, n=5000, n_surrogates=NUMBER_OF_SERNS, output_dir=OUTPUT_DIR, seed=None):
-    global NUMBER_OF_SERNS
+def main(n_runs=N_OF_RUNS, n=5000, n_surrogates=NUMBER_OF_SERNS, output_dir=OUTPUT_DIR, seed=None, run_sern=True):
+    global NUMBER_OF_SERNS, RUN_SERN
     NUMBER_OF_SERNS = n_surrogates
+    RUN_SERN = run_sern
     os.makedirs(output_dir, exist_ok=True)
 
     for run in trange(n_runs):
@@ -404,6 +463,10 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=None,
                          help="Base RNG seed; run i uses seed + i (default: unseeded). "
                               "The SLURM array passes its task id.")
+    parser.add_argument("--no-sern", action="store_true",
+                         help="Skip the SERN surrogates (SERN columns NaN). The crops are unchanged, since SERN "
+                              "draws from the separate legacy global RNG. Used for the detrending-only run "
+                              "(results/correction_benchmark/sphere_detrend/, merged by load_results.py).")
     args = parser.parse_args()
     main(n_runs=args.n_runs, n=args.n, n_surrogates=args.n_surrogates, output_dir=args.output_dir,
-         seed=args.seed)
+         seed=args.seed, run_sern=not args.no_sern)

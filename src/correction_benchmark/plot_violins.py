@@ -1,5 +1,5 @@
 """
-Figure 5: violin plots comparing raw / bosperrus-corrected (additive,
+Figure 5: violin plots comparing raw / detrended (linear, spline) / bosperrus-corrected (additive,
 multiplicative and log, see sphere.py) / SERN-corrected centrality correlations against the uncropped
 ("original") sphere benchmark. One figure per correlation method (Pearson,
 Spearman) -- see sphere.py's CORRELATION_METHODS -- and node subset ("all"
@@ -10,7 +10,6 @@ Run:
     cd truncated_graphs/
     pixi run python src/correction_benchmark/plot_violins.py
 """
-import glob
 from pathlib import Path
 
 import matplotlib
@@ -21,29 +20,35 @@ import pandas as pd
 import seaborn as sns
 from scipy.stats import mannwhitneyu
 
+from load_results import load_sphere
+
 ROOT = Path(__file__).resolve().parent.parent.parent
 
-METHOD_PALETTE = {"raw": "grey", "bosperrus": "#8ABBD6", "bosperrus_mult": "#3A7DB0", "bosperrus_log": "#1B3F66",
+METHOD_PALETTE = {"raw": "grey", "linear": "#D9C27E", "spline": "#A8842A", "bosperrus": "#8ABBD6", "bosperrus_mult": "#3A7DB0", "bosperrus_log": "#1B3F66",
                   "SERN": "#E59EDD"}
-METHOD_ORDER = ["raw", "bosperrus", "bosperrus_mult", "bosperrus_log", "SERN"]
-METHOD_LABELS = {"raw": "raw", "bosperrus": "bosperrus add.", "bosperrus_mult": "bosperrus mult.",
+METHOD_ORDER = ["raw", "linear", "spline", "bosperrus", "bosperrus_mult", "bosperrus_log", "SERN"]
+METHOD_LABELS = {"raw": "raw", "linear": "linear detr.", "spline": "spline detr.", "bosperrus": "bosperrus add.", "bosperrus_mult": "bosperrus mult.",
                  "bosperrus_log": "bosperrus log", "SERN": "SERN"}
 ROW_ORDER = ["delaunay", "delaunay_pruned", "knn", "rnn"]
 ROW_LABELS = {"delaunay": "Delaunay", "delaunay_pruned": "Delaunay\n(pruned)", "knn": "$k$-NN", "rnn": "$r$-NN"}
 CORR_LABEL = {"pearson": "Pearson $r$", "spearman": "Spearman $\\rho$"}
 FIG_WIDTH = 9  # this manuscript's full text width (matches figure3.svg)
 
-# Pairs (a, b, x_a, x_b, bracket height, MWU alternative). Pairs ordered
-# (worse, better) by assumed correction quality are one-sided ("less": is b's
-# correlation significantly *larger* than a's?); additive vs. multiplicative
-# and additive vs. log have no assumed order, so they are two-sided.
+# Pairs (a, b, bracket height, MWU alternative). Pairs ordered (worse, better)
+# by assumed correction quality are one-sided ("less": is b's correlation
+# significantly *larger* than a's?); additive vs. multiplicative, additive vs.
+# log and detrending vs. bosperrus have no assumed order, so they are two-sided.
 SIG_PAIRS = [
-    ("raw", "bosperrus",            0, 1, 1.04, "less"),
-    ("bosperrus_log", "SERN",       3, 4, 1.04, "less"),
-    ("bosperrus", "bosperrus_mult", 1, 2, 1.14, "two-sided"),
-    ("bosperrus", "bosperrus_log",  1, 3, 1.24, "two-sided"),
-    ("raw", "bosperrus_log",        0, 3, 1.34, "less"),
-    ("raw", "SERN",                 0, 4, 1.44, "less"),
+    ("raw", "linear",               1.04, "less"),
+    ("spline", "bosperrus",         1.04, "two-sided"),
+    ("bosperrus_mult", "bosperrus_log", 1.04, "two-sided"),
+    ("raw", "spline",               1.14, "less"),
+    ("bosperrus", "bosperrus_mult", 1.14, "two-sided"),
+    ("bosperrus_log", "SERN",       1.14, "less"),
+    ("bosperrus", "bosperrus_log",  1.24, "two-sided"),
+    ("spline", "bosperrus_log",     1.34, "two-sided"),
+    ("raw", "bosperrus_log",        1.44, "less"),
+    ("raw", "SERN",                 1.54, "less"),
 ]
 METHODS = METHOD_ORDER
 N_SAMPLE = 200
@@ -65,11 +70,7 @@ def _draw_bracket(ax, x1, x2, y, stars, fontsize=7):
 
 
 def load_data():
-    dfs = [
-        pd.read_csv(f).rename(columns={"Unnamed: 0": "measure"})
-        for f in glob.glob(str(ROOT / "results" / "correction_benchmark" / "sphere" / "*.csv"))
-    ]
-    all_dfs = pd.concat(dfs)
+    all_dfs = load_sphere(ROOT / "results" / "correction_benchmark")
     all_dfs = all_dfs[all_dfs["measure"].isin(
         ["betweenness", "degree", "closeness", "clustering", "pagerank"]
     )].copy()
@@ -79,6 +80,8 @@ def load_data():
         "original vs. BOSPERRUS corrected on crop": "bosperrus",
         "original vs. BOSPERRUS multiplicative on crop": "bosperrus_mult",
         "original vs. BOSPERRUS log on crop": "bosperrus_log",
+        "original vs. linear detrended on crop": "linear",
+        "original vs. spline detrended on crop": "spline",
         "original vs. SERN corrected on crop": "SERN",
     })
     all_dfs["radius"] = all_dfs["radius"].fillna(0)
@@ -168,14 +171,14 @@ def make_violin_plot(all_dfs, corr_method, out_dir, node_subset="all"):
 
             # --- one-sided MWU significance brackets: is the second method's
             # correlation significantly *larger* than the first's? ---
-            for a, b, x1, x2, y, alternative in SIG_PAIRS:
+            for a, b, y, alternative in SIG_PAIRS:
                 va = subset[a].dropna()
                 vb = subset[b].dropna()
                 if len(va) > 1 and len(vb) > 1:
                     _, p = mannwhitneyu(va, vb, alternative=alternative)
-                    _draw_bracket(ax, x1, x2, y, _get_stars(p))
+                    _draw_bracket(ax, METHOD_ORDER.index(a), METHOD_ORDER.index(b), y, _get_stars(p))
 
-    g.set(ylim=(-0.05, 1.58), yticks=[0, 0.5, 1])
+    g.set(ylim=(-0.05, 1.68), yticks=[0, 0.5, 1])
     g.figure.tight_layout()
     suffix = "" if node_subset == "all" else f"_{node_subset}"
     out = out_dir / f"correlations_violin_{corr_method}{suffix}.pdf"

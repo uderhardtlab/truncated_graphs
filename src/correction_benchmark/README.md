@@ -4,6 +4,8 @@ Sphere ground truth: crop a cap, recompute the graph on the crop, correct, compa
 
 - `sphere.py` (+ `sern.py`) → `results/correction_benchmark/sphere/correlations_seed*.csv`
   (SLURM array: `jobs/correction_benchmark_sphere.sbatch`, one seed per task).
+- `sphere.py --no-sern` → `results/correction_benchmark/sphere_detrend/` (detrending baselines only, same crops;
+  `jobs/correction_benchmark_sphere_detrend.sbatch`), merged with `sphere/` by `load_results.py`.
 - `summarize.py` → `results/correction_benchmark/summary.csv`; `plot_violins.py` → `result_plots/correction_benchmark/`
   (both: `jobs/correction_benchmark_plot.sbatch`).
 - `sanity_multiplicative.py` (correction variants, `jobs/correction_benchmark_sanity.sbatch`),
