@@ -22,7 +22,7 @@ and `result_plots/`:
 | `spatial_omics` | 2 + 3 | Visium HD / Stereo-seq: data-driven analysis buffer (section 2) and RNA-diffusion QC (section 3); one shared pipeline |
 | `microns` | 2 (panel) | MICrONS connectome analysis buffer (more code/data in `/home/woody/iwbn/iwbn007h/MICrONS_data/`) |
 | `computational_effects` | 4 | MIBI-TOF fits across graph types/measures; edge-truncation root causes |
-| `correction_benchmark` | 5 | sphere benchmark (BOSPERRUS additive/multiplicative/log vs. SERN), sanity checks, runtime scaling |
+| `correction_benchmark` | 5 | sphere benchmark (BOSPERRUS additive/multiplicative/log vs. linear/spline detrending vs. SERN), sanity checks, runtime scaling |
 | `archive` | — | superseded or removed-from-paper code, notebooks and outputs |
 
 Results notes (what was found, decisions, to-dos) live outside this repo, one
@@ -95,7 +95,8 @@ Heavy work goes through SLURM on the tinyfat cluster, never the login node; subm
 
 ```bash
 sbatch --clusters=tinyfat jobs/correction_benchmark_sphere.sbatch        # 100-seed array (~4 h per task with 400 SERN surrogates)
-sbatch --clusters=tinyfat jobs/correction_benchmark_plot.sbatch          # violins + summary
+sbatch --clusters=tinyfat jobs/correction_benchmark_sphere_detrend.sbatch  # same seeds, --no-sern (detrending baselines, ~4 min per task)
+sbatch --clusters=tinyfat jobs/correction_benchmark_plot.sbatch          # violins + summary (merges sphere/ + sphere_detrend/)
 sbatch --clusters=tinyfat jobs/computational_effects_compute_fits.sbatch
 sbatch --clusters=tinyfat --job-name=st_<sample> jobs/spatial_omics_st_precompute.sbatch <sample> [--ablation|--image-mask]
 ```
@@ -126,7 +127,7 @@ Note: kNN edges are `(u, v)` tuples; Delaunay and rNN edges are `frozenset({u, v
 - **Squidpy Visium**: 35 spatial transcriptomics datasets fetched via `sq.datasets.visium()` in `get_squidpy_visium_datasets()`.
 - **SNAP**: Geolocated check-in network (Brightkite); used for urban/social network comparison. Expected at `SNAP_data/` (gitignored via `.gitignore`'s `*data*` pattern — populate locally).
 - **MICrONS / Reimann connectome**: `data/reimann_data/microns_mm3_connectome.h5`, read by the `microns` and `overview` notebooks via `src/microns/micron_comparison.py`.
-- **Visium HD demo data**: 12 public 10x datasets ("v1 - Protocol 2.0"), binned outputs at 8/16 µm in `/home/woody/iwbn/iwbn007h/visium_hd_demo_data/` (list: `chemistry_protocol2_list.txt`); samples for the pipeline are listed in `src/spatial_omics/st_samples.csv`.
+- **Visium HD demo data**: the public 10x "v1 - Protocol 2.0" datasets with H&E (11; the IF-stained ovarian cancer is downloaded but excluded), binned outputs at 8/16 µm in `/home/woody/iwbn/iwbn007h/visium_hd_demo_data/` (list: `chemistry_protocol2_list.txt`); samples for the pipeline are listed in `src/spatial_omics/st_samples.csv`.
 - **Blue Brain Project connectome**: expected at `reimann_data/connectome_BBP.h5`, read by the exploratory `edge_effect_in_BBP.ipynb`.
 
 All data-containing directories (`SNAP_data/`, `CD34_data/`, `TWOMBLI_data/`, `geo_data/`, `reimann_data/`) match `.gitignore`'s `*data*` pattern and must be populated per-checkout; `mibitof_coords/` is the one exception — it doesn't match that pattern, and is provisioned in this checkout.

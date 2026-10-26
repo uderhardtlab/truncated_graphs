@@ -9,6 +9,6 @@ Visium HD and Stereo-seq (STOmics) at 8 × 8 µm. One shared pipeline for both s
   Run per sample via `jobs/spatial_omics_st_precompute.sbatch <sample>`.
 - `st_samples.csv` — sample list (name, technology, path, mask settings).
 - Figures: `notebooks/spatial_omics/ST.ipynb`; checks: `notebooks/spatial_omics/border_sanity_checks.ipynb`.
-- Data: Visium HD demo set (12 "Protocol 2.0" datasets) in `/home/woody/iwbn/iwbn007h/visium_hd_demo_data/`.
+- Data: Visium HD demo set (11 "Protocol 2.0" datasets with H&E) in `/home/woody/iwbn/iwbn007h/visium_hd_demo_data/`.
 
 Results, decisions and to-dos: `../../../notes/spatial_omics.md`.
