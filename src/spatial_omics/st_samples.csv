@@ -11,3 +11,11 @@ A02991D1,stomics_custom,stereo-seq,/home/vault/iwbn/shared/stomics_data_analysis
 A02994C6,stomics_custom,stereo-seq,/home/vault/iwbn/shared/stomics_data_analysis/Patient_2_out/271025_realigned,{}
 Y01087DD,stomics_custom,stereo-seq,/home/vault/iwbn/shared/stomics_data_analysis/Patient_3_out/300626_2nd_exp,{}
 Y01084J8,stomics_custom,stereo-seq,/home/vault/iwbn/shared/stomics_data_analysis/Patient_4_out/300626_2nd_exp,{}
+rat_liver,visium_demo,visium_hd,/home/woody/iwbn/iwbn007h/visium_hd_demo_data/Visium_HD_6p5mm_Rat_Liver/binned_outputs,{}
+brain_cancer,visium_demo,visium_hd,/home/woody/iwbn/iwbn007h/visium_hd_demo_data/Visium_HD_6p5mm_Human_Brain_Cancer/binned_outputs,{}
+tissue_array,visium_demo,visium_hd,/home/woody/iwbn/iwbn007h/visium_hd_demo_data/Visium_HD_11mm_Human_TA/binned_outputs,{}
+colon_cancer_6p5mm,visium_demo,visium_hd,/home/woody/iwbn/iwbn007h/visium_hd_demo_data/Visium_HD_6p5mm_Human_Colon_Cancer/binned_outputs,{}
+heart,visium_demo,visium_hd,/home/woody/iwbn/iwbn007h/visium_hd_demo_data/Visium_HD_6p5mm_Human_Heart/binned_outputs,{}
+mouse_brain,visium_demo,visium_hd,/home/woody/iwbn/iwbn007h/visium_hd_demo_data/Visium_HD_6p5mm_Mouse_Brain/binned_outputs,{}
+mouse_embryo,visium_demo,visium_hd,/home/woody/iwbn/iwbn007h/visium_hd_demo_data/Visium_HD_11mm_Mouse_Embryo/binned_outputs,{}
+ovarian_cancer_if,visium_demo,visium_hd,/home/woody/iwbn/iwbn007h/visium_hd_demo_data/Visium_HD_11mm_Human_Ovarian_Cancer_IF/binned_outputs,{}
