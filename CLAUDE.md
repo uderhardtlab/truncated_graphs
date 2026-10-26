@@ -11,82 +11,53 @@ Research project studying **border/boundary effects in spatial graphs** — how 
 
 ## Codebase Structure
 
-Each of `results/`, `result_plots/`, and `notebooks/` is organized **one
-subfolder per manuscript figure** (`figure1/` … `figure5/`), plus an
-`exploratory/` subfolder for work not yet tied to a numbered figure (see
-`../STORY.md`'s "File organization convention" for the full rationale —
-this replaced an earlier, inconsistent ad hoc numbering where folder/file
-names didn't match the manuscript's actual figure order).
+Organised by **topic = paper section** (restructured 2026-10-26; the old
+`figure1/`…`figure5/` numbering is gone, because section order may still
+change). The same topic names are used in `src/`, `notebooks/`, `results/`
+and `result_plots/`:
 
-`src/` follows the same `figureN/`/`exploratory/` convention. Two exceptions,
-both deliberate: `archive/` stays separate from `exploratory/` (pre-existing
-"confirmed superseded, not in active use" category, distinct from
-"not yet graduated"), and `__init__.py` stays at `src/` root (package
-marker — though it's already broken independent of this reorg: it imports
-`src.truncated_graphs` and `src.fit`, neither of which exists). Per-figure
-shared code was resolved by checking actual cross-file imports rather than
-assumed: `border_effects_kNN_del.py` and `sern.py` each turned out to be
-used by exactly one script, so they moved in alongside their sole consumer
-rather than needing a separate shared location.
+| topic | paper section | what |
+|---|---|---|
+| `overview` | 1 | Figure 1 (boundary-effect examples, pipeline panels) |
+| `spatial_omics` | 2 + 3 | Visium HD / Stereo-seq: data-driven analysis buffer (section 2) and RNA-diffusion QC (section 3); one shared pipeline |
+| `microns` | 2 (panel) | MICrONS connectome analysis buffer (more code/data in `/home/woody/iwbn/iwbn007h/MICrONS_data/`) |
+| `computational_effects` | 4 | MIBI-TOF fits across graph types/measures; edge-truncation root causes |
+| `correction_benchmark` | 5 | sphere benchmark (BOSPERRUS additive/multiplicative/log vs. SERN), sanity checks, runtime scaling |
+| `archive` | — | superseded or removed-from-paper code, notebooks and outputs |
+
+Results notes (what was found, decisions, to-dos) live outside this repo, one
+file per topic: `../notes/<topic>.md`, indexed by `../RESULTS.md`. Each
+`src/<topic>/README.md` says what the folder is for.
 
 ```
 truncated_graphs/
 ├── src/
-│   ├── figure2/
-│   │   ├── edge_effects.py        # Figure 2 (edge truncation effects, Delaunay/kNN);
-│   │   │                            writes results/figure2/, result_plots/figure2/
-│   │   └── border_effects_kNN_del.py  # Graph construction utilities + trunc_graphs()
-│   │                                    API; used only by edge_effects.py
-│   ├── figure3/
-│   │   ├── compute_fits.py        # Figure 3 data (AIC fits per MIBI-TOF dataset/graph
-│   │   │                            type); writes results/figure3/
-│   │   └── plot_metrics.py        # Figure 3 plot (panels e-h); reads results/figure3/
-│   │                                + ../../fit_palette.json, writes result_plots/figure3/
-│   ├── figure4/
-│   │   └── micron_comparison.py   # Figure 4 (MICrONS buffer identification); writes
-│   │                                 result_plots/figure4/ and ../../../bosperrus/figures/figure4/
-│   ├── figure5/
-│   │   ├── sphere.py              # Figure 5 (sphere benchmark); writes results/figure5/
-│   │   └── sern.py                # SERN surrogate ensemble (parallel via joblib);
-│   │                                used only by sphere.py
-│   ├── exploratory/                # sf_distance_over_time.py (Brightkite temporal,
-│   │                                  misfiled under fig2/ before this reorg — not
-│   │                                  figure-2-related), es_border.py, iow_coast.py,
-│   │                                  uk_rail_analysis.py (geo/social scratch scripts),
-│   │                                  make_pipeline_fig.py (older pipeline-figure
-│   │                                  script; writes to a path,
-│   │                                  "bosperrus/figures/Fig_pipeline", that matches no
-│   │                                  current file — likely superseded by
-│   │                                  notebooks/figure1/pipeline_figure.ipynb)
-│   ├── figure1/                    # currently empty — no src/ code maps here yet;
-│   │                                  figure1's only current producer is the notebook
-│   └── archive/                    # Older iterations (not in active use)
+│   ├── spatial_omics/          st_precompute.py (buffer + BLADE + diffusion per sample; writes
+│   │                           results/spatial_omics/st_reroll/, gitignored), blade.py, st_samples.csv
+│   ├── microns/                micron_comparison.py (library for the MICrONS notebooks)
+│   ├── computational_effects/  compute_fits.py, plot_metrics.py, plot_entropy*.py (MIBI-TOF fits),
+│   │                           edge_effects.py + border_effects_kNN_del.py (edge truncation)
+│   ├── correction_benchmark/   sphere.py, sern.py, summarize.py, plot_violins.py,
+│   │                           sanity_multiplicative.py, plot_delaunay_cap.py, runtime_scaling.py
+│   └── archive/                old Visium HD pipeline (visium_hd.py, border_fit.py, figure4/, ...),
+│                               old exploratory scripts, older iterations
 ├── notebooks/
-│   ├── figure1/pipeline_figure.ipynb
-│   ├── figure4/                   # "Microns check edge effect bosperrus.ipynb" and
-│   │                                 "...original REIMANN.ipynb"
-│   ├── figure5/figure5.ipynb, figure5_a.ipynb
-│   └── exploratory/                # edge_effect_in_BBP.ipynb (Blue Brain Project
-│                                      connectome, not MICrONS), squidpy_example.ipynb,
-│                                      timezones_snap_data.ipynb, urbanity_snap_data.ipynb
-│                                      — none currently declare a rubric #8 status marker
-├── results/                       # figure1(empty) .. figure5(300 CSVs), exploratory
-│                                     (empty), archive/figure3_pre_revision (101 CSVs,
-│                                     an older non-overlapping sphere.py batch, see
-│                                     ../STORY.md Key Result #1)
-├── result_plots/                  # figure1(8 pipeline panels) .. figure5, exploratory
-├── fit_palette.json                # shared color palette; used by both notebooks/
-│                                     and src/figure3/plot_metrics.py — kept at this shared
-│                                     root rather than nested under notebooks/
-├── mibitof_coords/, SNAP_data/, CD34_data/, TWOMBLI_data/, geo_data/, reimann_data/
-│                                   # raw/cached input data — all match .gitignore's
-│                                     `*data*` pattern except mibitof_coords/, which
-│                                     doesn't match that pattern but is provisioned here
-│                                     anyway (referenced by compute_fits.py and
-│                                     pipeline_figure.ipynb)
+│   ├── overview/               boundary_effects.ipynb (Figure 1 examples), pipeline_figure.ipynb
+│   ├── spatial_omics/          ST.ipynb (sections 2/3 figures, reads st_reroll), border_sanity_checks.ipynb
+│   ├── microns/                MICRONS_analysis_buffer.ipynb
+│   ├── tutorials/              bosperrus_on_TMA.ipynb
+│   └── archive/                exploratory/ (clustering, spatial domains, ...), pre_reroll/, older
+├── results/<topic>/            computational_effects/{edge_effects,mibitof_fits}/,
+│                               correction_benchmark/{sphere,sanity,runtime_scaling}/ + summary.csv,
+│                               spatial_omics/st_reroll/ (gitignored); results/archive/
+├── result_plots/<topic>/       same topics; result_plots/archive/
+├── jobs/                       <topic>_*.sbatch (SLURM, tinyfat); jobs/archive/; logs in jobs/logs/
+├── literature/                 reference PDFs (gitignored, not redistributable)
+├── fit_palette.json            shared colour palette
+└── mibitof_coords/, data/      inputs (data dirs gitignored via `*data*`)
 ```
 
-The core dependency is the **bosperrus package**, published on PyPI and pulled in as a normal dependency via `pixi` (see `pyproject.toml` / `pixi.lock`). The sibling checkout lives at `/home/woody/iwbn/iwbn007h/bosperrus/bosperrus-package/`. Note: `src/figure2/border_effects_kNN_del.py` and `src/figure5/sern.py` still contain leftover `sys.path.append(...)` hacks pointing at a local checkout, predating the PyPI release — if you edit the package locally and want these two scripts to pick up the change, make sure that path actually resolves, since the PyPI-installed version and local source are not automatically kept in sync. `sern.py`'s hack is a *relative* path (`../../bosperrus-package/`) resolved against whatever the process's cwd is at import time, not against the file's own location — it stays correct only because the documented run convention below keeps `cwd=src/` regardless of which `figureN/` subfolder actually holds the script being invoked.
+The core dependency is the **bosperrus package** (sibling checkout `../bosperrus-package/`, installed editable into the pixi env). `src/computational_effects/border_effects_kNN_del.py` still has a stale `sys.path.append("/data/bionets/je30bery/bosperrus-package")` (harmless, the installed package is used); `src/correction_benchmark/sern.py` appends `../../bosperrus-package/` relative to the cwd, which resolves only with `cwd=src/`.
 
 ## bosperrus Package Architecture
 
@@ -108,54 +79,36 @@ After construction, call `flow.flow()` to run all fits, then read `flow.fit_qual
 
 ## Running Scripts
 
-Scripts are run from the `src/` directory (imports use relative `sys.path` additions):
-
-Invoke each script by its `figureN/` sub-path, but keep `src/` itself as
-the working directory — every script's internal relative paths
-(`../results/...`, `../../results/...`, etc.) assume that cwd, not
-`cwd=` their own subfolder:
+Scripts run with **`src/` as the working directory**, invoked by their topic sub-path; their relative paths (`../results/<topic>/...`) assume that cwd:
 
 ```bash
 cd /home/woody/iwbn/iwbn007h/bosperrus/truncated_graphs/src
-
-# Figure 2 — edge truncation effects (Delaunay/kNN); writes ../results/figure2/, ../result_plots/figure2/
-pixi run python figure2/edge_effects.py
-
-# Figure 3 data — AIC fits per MIBI-TOF dataset/graph type (reads
-# mibitof_coords/coords.pickle); writes ../results/figure3/. Caches per graph
-# type — delete a CSV under results/figure3/ to force recomputation.
-pixi run python figure3/compute_fits.py
-
-# Figure 3 plot — reads ../results/figure3/ + ../fit_palette.json (from cwd=src/); writes ../result_plots/figure3/
-pixi run python figure3/plot_metrics.py
-
-# Figure 4 — MICrONS buffer identification (FN_MAT input path is still a stale,
-# nonexistent-here absolute path — see ../STORY.md Key Result #4)
-pixi run python figure4/micron_comparison.py
-
-# Figure 5 — sphere benchmark (100 runs × 3 coord configs × 3 graph types; writes
-# ../results/figure5/; NOT seeded — see ../STORY.md Key Result #1)
-pixi run python figure5/sphere.py
+pixi run python computational_effects/compute_fits.py      # MIBI-TOF fits -> ../results/computational_effects/mibitof_fits/ (cached per graph type)
+pixi run python computational_effects/plot_metrics.py      # -> ../result_plots/computational_effects/mibitof_fits/
+pixi run python computational_effects/edge_effects.py      # -> ../results|result_plots/computational_effects/edge_effects/
+pixi run python correction_benchmark/sphere.py --n-runs 1 --seed 0   # one sphere run -> ../results/correction_benchmark/sphere/
+pixi run python correction_benchmark/summarize.py          # -> ../results/correction_benchmark/summary.csv
+pixi run python correction_benchmark/plot_violins.py       # -> ../result_plots/correction_benchmark/
 ```
 
-Run `pixi install` once (from `truncated_graphs/`) before the above — it resolves both the conda-forge dependencies (currently just `graph-tool`, which pip/`uv` couldn't provide) and the PyPI dependencies (`bosperrus`, `squidpy`, etc.) into one environment. `compute_centrality_measures` picks `graph-tool` automatically now that it's installed (see `bosperrus/centrality_measures.py`'s `backend=None` auto-detection) — no more silent fallback to the slower networkx backend.
+Heavy work goes through SLURM on the tinyfat cluster, never the login node; submit from `truncated_graphs/`:
 
-Notebooks are run from their own subdirectory under `notebooks/` (e.g.
-`notebooks/figure1/`), which is one level deeper than the old flat
-`notebooks/` layout — any `../` relative path inside a notebook now needs
-one extra `../` to reach `truncated_graphs/`. Results are cached to CSV in
-`results/` and re-read on subsequent runs to avoid recomputation.
+```bash
+sbatch --clusters=tinyfat jobs/correction_benchmark_sphere.sbatch        # 100-seed array (~4 h per task with 400 SERN surrogates)
+sbatch --clusters=tinyfat jobs/correction_benchmark_plot.sbatch          # violins + summary
+sbatch --clusters=tinyfat jobs/computational_effects_compute_fits.sbatch
+sbatch --clusters=tinyfat --job-name=st_<sample> jobs/spatial_omics_st_precompute.sbatch <sample> [--ablation|--image-mask]
+```
 
-## Key Parameters (sphere.py)
+Notebooks run from their own folder (`notebooks/<topic>/`), so their paths start with `../../`; execute heavy ones on a compute node with `pixi run jupyter nbconvert --to notebook --execute --inplace <nb>`.
 
-- `NUMBER_OF_SERNS = 400` — SERN ensemble size (Rheinwalt et al. 2012 use 1000, but their Fig. 2 shows reliability plateaus after ~400)
-- `N_JOBS = 128` — joblib workers for parallel surrogate generation
-- `N_OF_RUNS = 100` — independent outer repetitions
+## Key Parameters (correction_benchmark/sphere.py)
+
+- `NUMBER_OF_SERNS = 400` — SERN ensemble size (Rheinwalt et al. 2012 use 1000, but their Fig. 2 shows reliability plateaus after ~400; paper in `literature/`)
+- `N_JOBS = -1` — joblib workers for SERN surrogates (all cores of the job)
+- `N_OF_RUNS = 100` — outer repetitions; the SLURM array runs one per task with `--seed <task id>`
 - `OMP_NUM_THREADS = 8` — set via `os.environ`
-- **No RNG seed anywhere** — `sample_uniform_on_unit_sphere`,
-  `sample_von_mises_fisher`, and `crop_cap` all use unseeded
-  `np.random.default_rng()`/`np.random.choice`. Runs are re-runnable-in-kind
-  but not bit-reproducible (found via `results-hygiene`; see `../STORY.md`).
+- Seeded: `--seed s` seeds the sampler, the crops and SERN's global RNG for run `s` (bit-reproducible per seed).
 
 ## Graph Types
 
@@ -169,10 +122,11 @@ Note: kNN edges are `(u, v)` tuples; Delaunay and rNN edges are `frozenset({u, v
 
 ## Data Sources
 
-- **MIBI-TOF**: Segmentation TIFFs → centroid extraction in `get_mibitof()`. Coordinate dicts expected at `mibitof_coords/coords.pickle`, provisioned in this checkout; used by `compute_fits.py` and `pipeline_figure.ipynb`.
+- **MIBI-TOF**: Segmentation TIFFs → centroid extraction in `get_mibitof()`. Coordinate dicts at `mibitof_coords/coords.pickle`, provisioned in this checkout; used by `computational_effects/compute_fits.py` and the `overview` notebooks.
 - **Squidpy Visium**: 35 spatial transcriptomics datasets fetched via `sq.datasets.visium()` in `get_squidpy_visium_datasets()`.
 - **SNAP**: Geolocated check-in network (Brightkite); used for urban/social network comparison. Expected at `SNAP_data/` (gitignored via `.gitignore`'s `*data*` pattern — populate locally).
-- **MICrONS / Reimann connectome**: expected at `reimann_data/microns_mm3_connectome.h5`; `micron_comparison.py`'s `FN_MAT` still points at a stale, nonexistent `je30bery`-only absolute path (see `../STORY.md` Key Result #4).
+- **MICrONS / Reimann connectome**: `data/reimann_data/microns_mm3_connectome.h5`, read by the `microns` and `overview` notebooks via `src/microns/micron_comparison.py`.
+- **Visium HD demo data**: 12 public 10x datasets ("v1 - Protocol 2.0"), binned outputs at 8/16 µm in `/home/woody/iwbn/iwbn007h/visium_hd_demo_data/` (list: `chemistry_protocol2_list.txt`); samples for the pipeline are listed in `src/spatial_omics/st_samples.csv`.
 - **Blue Brain Project connectome**: expected at `reimann_data/connectome_BBP.h5`, read by the exploratory `edge_effect_in_BBP.ipynb`.
 
 All data-containing directories (`SNAP_data/`, `CD34_data/`, `TWOMBLI_data/`, `geo_data/`, `reimann_data/`) match `.gitignore`'s `*data*` pattern and must be populated per-checkout; `mibitof_coords/` is the one exception — it doesn't match that pattern, and is provisioned in this checkout.

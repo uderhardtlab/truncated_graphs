@@ -12,7 +12,11 @@ jobs/logs/*
 !jobs/logs/.gitkeep
 jobs
 
-results/exploratory
+# large/intermediate results (moved from results/exploratory in the 2026-10-26 restructure)
+results/archive/exploratory
+results/spatial_omics/st_reroll
+# papers kept for reference only (not redistributable)
+literature/
 src/archive
 # notebook/script caches
 notebooks/cache/
