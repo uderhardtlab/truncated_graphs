@@ -37,7 +37,9 @@ from sern import surrogate_ensemble_gt
 import os
 os.environ["OMP_NUM_THREADS"] = "8"
 
-NUMBER_OF_SERNS = 100
+# Rheinwalt et al. 2012 use 1000 surrogates, but their Fig. 2 shows reliability
+# barely improves after ~400 -- the cheapest size their own analysis supports
+NUMBER_OF_SERNS = 400
 N_JOBS = -1  # joblib: use all available cores on whatever machine this runs on
 N_OF_RUNS = 100
 
@@ -206,9 +208,9 @@ def get_sern_median(crop_coords, local_edges, measures):
         n_surrogates=NUMBER_OF_SERNS,
         n_jobs=N_JOBS,
     )
-    sern_median = pd.DataFrame(sern_median)
-    sern_median["degree"] = sern_median["degree"].astype(int)
-    return sern_median
+    # no int cast on degree: the ensemble median can be x.5, and truncating it
+    # would bias the boundary-effect estimate down
+    return pd.DataFrame(sern_median)
 
 
 def _corr(corr_fn, x, y, ok=None):

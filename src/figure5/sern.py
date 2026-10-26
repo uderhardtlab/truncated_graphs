@@ -70,16 +70,30 @@ def surrogate_ensemble_gt(coords, edge_list, n_bins, measures, n_surrogates=200,
     # results aren't guaranteed to share the same keys -- aggregate over
     # whichever surrogates actually produced each key instead of assuming
     # every one of them did.
+    #
+    # Nodes whose value is NaN in every surrogate stay NaN (no estimate)
+    # rather than being set to 0, which would silently leave them uncorrected;
+    # callers are expected to exclude non-finite nodes and count them.
     medians = {}
     all_keys = set().union(*(r.keys() for r in results))
     for key in all_keys:
         present = [np.asarray(r[key]) for r in results if key in r]
+        if len(present) < len(results):
+            warnings.warn(
+                f"SERN: {key} failed on {len(results) - len(present)}/{len(results)} "
+                f"surrogates; median taken over the remaining {len(present)}"
+            )
         values = np.array(present)
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", category=RuntimeWarning)
             measure_medians = np.nanmedian(values, axis=0)
 
-        measure_medians = np.nan_to_num(measure_medians, nan=0)
+        n_nan = int(np.isnan(measure_medians).sum())
+        if n_nan:
+            warnings.warn(
+                f"SERN: {key} is NaN in every surrogate for {n_nan}/{N} nodes; "
+                "leaving their boundary-effect estimate as NaN"
+            )
         medians[key] = measure_medians
     return medians
 

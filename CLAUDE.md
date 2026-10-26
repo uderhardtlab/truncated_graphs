@@ -148,7 +148,7 @@ one extra `../` to reach `truncated_graphs/`. Results are cached to CSV in
 
 ## Key Parameters (sphere.py)
 
-- `NUMBER_OF_SERNS = 100` — SERN ensemble size
+- `NUMBER_OF_SERNS = 400` — SERN ensemble size (Rheinwalt et al. 2012 use 1000, but their Fig. 2 shows reliability plateaus after ~400)
 - `N_JOBS = 128` — joblib workers for parallel surrogate generation
 - `N_OF_RUNS = 100` — independent outer repetitions
 - `OMP_NUM_THREADS = 8` — set via `os.environ`
