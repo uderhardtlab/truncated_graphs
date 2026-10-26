@@ -43,7 +43,7 @@ truncated_graphs/
 │                               old exploratory scripts, older iterations
 ├── notebooks/
 │   ├── overview/               boundary_effects.ipynb (Figure 1 examples), pipeline_figure.ipynb
-│   ├── spatial_omics/          ST.ipynb (sections 2/3 figures, reads st_reroll), border_sanity_checks.ipynb
+│   ├── spatial_omics/          ST_demo.ipynb (sec. 2), ST_paired.ipynb (sec. 3), border_sanity_checks_{demo,paired}.ipynb
 │   ├── microns/                MICRONS_analysis_buffer.ipynb
 │   ├── tutorials/              bosperrus_on_TMA.ipynb
 │   └── archive/                exploratory/ (clustering, spatial domains, ...), pre_reroll/, older

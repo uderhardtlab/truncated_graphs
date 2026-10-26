@@ -1,5 +1,5 @@
-"""Per-sample precomputation for notebooks/ST.ipynb and
-notebooks/border_sanity_checks.ipynb, run on a compute node (see
+"""Per-sample precomputation for notebooks/spatial_omics/ST_{demo,paired}.ipynb and
+border_sanity_checks_{demo,paired}.ipynb, run on a compute node (see
 st_precompute.sbatch). Everything here goes through the two bosperrus entry
 points -- nothing is re-implemented locally except BLADE (blade.py, not part
 of bosperrus):
