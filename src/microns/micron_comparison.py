@@ -176,7 +176,7 @@ def prepare_microns_data(fn_mat, nbins, alpha, reimann_thresh):
 # ── plotting ──────────────────────────────────────────────────────────────────
 def plot_fits_panel(ax, flow, alpha_distances, scores, measure,
                      fit_color, legend_label_fn, ylabel, title):
-    """2D histogram (via `bosperrus.plot_fit`) of `measure`'s centrality score
+    """Quantile bands + per-distance mean (via `bosperrus.plot_fit`) of `measure`'s centrality score
     vs. distance to the alpha-shape boundary, overlaid with the fitted
     piecewise-linear BOSPERRUS curve. `legend_label_fn(measure, b, m, c)`
     builds the legend text (e.g. to show the fitted elbow value).

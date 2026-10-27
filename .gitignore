@@ -13,11 +13,16 @@ jobs/logs/*
 jobs
 
 # large/intermediate results (moved from results/exploratory in the 2026-10-26 restructure)
-results/archive/exploratory
 results/spatial_omics/st_reroll
 # papers kept for reference only (not redistributable)
 literature/
-src/archive
 # notebook/script caches
 notebooks/cache/
 src/cache/
+
+# superseded / exploratory material: kept locally, not in the repo (untracked 2026-10-27)
+src/archive/
+notebooks/archive/
+results/archive/
+result_plots/archive/
+jobs/archive/

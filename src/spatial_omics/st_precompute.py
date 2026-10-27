@@ -17,7 +17,14 @@ native 8um bins; Stereo-seq bin1 pooled 16x16).
 Usage (cwd = truncated_graphs/):
     pixi run python src/spatial_omics/st_precompute.py <sample>              # 8um: buffer + diffusion
     pixi run python src/spatial_omics/st_precompute.py <sample> --ablation   # diffusion only, all ABLATION_RESOLUTIONS
-    pixi run python src/spatial_omics/st_precompute.py <sample> --image-mask # border analysis on raw bins inside the image mask
+    pixi run python src/spatial_omics/st_precompute.py <sample> --image-mask # border analysis: raw bins inside the image mask,
+                                             # elbow vs. distance to the tissue edge (main figures)
+    pixi run python src/spatial_omics/st_precompute.py <sample> --in-tissue  # same on Space Ranger's in_tissue bins (supplement)
+    pixi run python src/spatial_omics/st_precompute.py <sample> --tissue-edge --resolution 2
+                                             # elbow only (no BLADE) at any bin size, zero-count bins kept (resolution check)
+
+Every elbow fit is rising-only (bosperrus.RisingPiecewiseLinearFit) and uses only bins within
+TISSUE_FIT_MAX_DISTANCE_UM of the border.
 
 Writes to results/spatial_omics/st_reroll/:
     {sample}_filtered_bins.parquet  one row per filtered bin (+ virtual=True rows for filled
@@ -52,6 +59,9 @@ OUT_DIR = TRUNCATED_GRAPHS / "results" / "spatial_omics" / "st_reroll"
 RESOLUTION_UM = 8.0
 MIN_COMPONENT_SPOTS = 1000
 MAX_HOLE_AREA_UM2 = 1024.0  # fill enclosed empty holes up to 16 bins at 8um (see identify_analysis_buffer_from_filtered)
+# the elbow is fitted only on bins within this distance of the border -- the distance range the
+# border criterion was calibrated on (interior windows up to 2 mm, see interior_windows.py)
+TISSUE_FIT_MAX_DISTANCE_UM = 1000.0
 ABLATION_RESOLUTIONS = {
     "visium_hd": [2.0, 8.0, 16.0],
     "stereo-seq": [2.0, 4.0, 8.0, 10.0, 16.0, 25.0],
@@ -122,6 +132,7 @@ def run_buffer(sample, technology, path, adata=None, footprint="pipeline"):
     _log(f"  {adata.n_obs:,} input bins ({footprint}); identify_analysis_buffer_from_filtered ...")
     bosperrus.identify_analysis_buffer_from_filtered(
         adata, min_component_size=MIN_COMPONENT_SPOTS, max_hole_area_um2=MAX_HOLE_AREA_UM2,
+        rising_only=True,
     )
     fit_info = adata.uns["analysis_buffer_fit"]
     virtual = fit_info["filled_hole_positions"]
@@ -134,6 +145,8 @@ def run_buffer(sample, technology, path, adata=None, footprint="pipeline"):
     array_row, array_col = obs["array_row"].to_numpy(), obs["array_col"].to_numpy()
     n_counts, components = obs["n_counts"].to_numpy(), obs["components"].to_numpy()
     distance = obs["distance_to_border"].to_numpy()
+    # uncapped distance for applying the BLADE correction (the fits only see bins within the cap)
+    full_distance = obs["distance_full_um"].to_numpy() if "distance_full_um" in obs else None
     buffer = obs["analysis_buffer"].to_numpy()
 
     blade_layer = np.zeros(len(obs), dtype=np.int32)
@@ -151,6 +164,14 @@ def run_buffer(sample, technology, path, adata=None, footprint="pipeline"):
         sweep, blade = peel_sweep(array_row[member], array_col[member], {"n_counts": n_counts[member]}, **peel)
         exp_sat = bosperrus.ExponentialSaturationFit(n_counts[member], distance[member])
         n_counts_corrected = np.asarray(exp_sat.fit_correct())
+        if full_distance is not None and exp_sat._converged:
+            # fitted on the capped distances, applied to every bin (no step at the cap):
+            # S + asymptote - model(d) = S + a * exp(-b * d)
+            p = exp_sat.params
+            n_counts_corrected = n_counts[member] + p["exponential_saturation_a"] * np.exp(
+                -p["exponential_saturation_b"] * full_distance[member])
+        # bins without a distance (none in the current runs) are not fit: keep their raw counts
+        n_counts_corrected = np.where(np.isfinite(n_counts_corrected), n_counts_corrected, n_counts[member])
         sweep_corr, blade_corr = peel_sweep(array_row[member], array_col[member],
                                             {"n_counts_corrected": n_counts_corrected}, **peel)
         # BLADE buffer depth: number of layers removed (p < 0.05); NaN if the sweep never reached p >= 0.05
@@ -177,6 +198,7 @@ def run_buffer(sample, technology, path, adata=None, footprint="pipeline"):
             "blade_thresh_um": n_removed * RESOLUTION_UM,
             "blade_thresh_corrected_um": n_removed_corr * RESOLUTION_UM,
             "exp_sat_converged": bool(exp_sat._converged),
+            "max_distance_um": float(np.nanmax(distance[member])),  # distance range the elbow fit saw
             "blade_sweep": sweep.to_dict(orient="list"),
             "blade_sweep_corrected": sweep_corr.to_dict(orient="list"),
         }
@@ -269,13 +291,26 @@ def run_main(sample):
     _log(f"wrote {sample} outputs to {OUT_DIR}")
 
 
+def distance_to_tissue_edge(raw, inside):
+    """Distance (um) of every bin inside the image mask to the edge of the whole image mask
+    (tissue beyond the capture area still counts as tissue; the mask never touches the image
+    edge, see bosperrus.image_masks.segment_tissue_from_rgb)."""
+    mask = raw["mask"].astype(bool)
+    inside_px = ndimage.distance_transform_edt(mask) * float(raw["mask_pixel_size_um"])
+    r = np.clip(np.rint(raw["mask_row"][inside]).astype(np.int64), 0, mask.shape[0] - 1)
+    c = np.clip(np.rint(raw["mask_col"][inside]).astype(np.int64), 0, mask.shape[1] - 1)
+    return inside_px[r, c]
+
+
 def run_image_mask(sample):
-    """Supplementary variant of run_buffer's border analysis: instead of the
-    pipeline's own tissue call (Space Ranger in_tissue / SAW tissue cut), the
-    input bins are the raw 8um bins inside the image-only tissue mask (distance
-    to the mask == 0, exactly the mask used by quantify_diffusion_from_raw;
-    read from the main run's {sample}_diffusion_8um.npz). Everything after that
-    -- n_counts > 0, hole filling, components, elbow, BLADE -- is identical.
+    """Border analysis of the main figures: run_buffer on the raw 8um bins inside the
+    image-only tissue mask (distance to the mask == 0, exactly the mask used by
+    quantify_diffusion_from_raw; read from the main run's {sample}_diffusion_8um.npz)
+    instead of the pipeline's own tissue call. The elbow is fitted against the
+    distance to the edge of the whole image mask (cuts by the capture area are not a
+    border), on bins within TISSUE_FIT_MAX_DISTANCE_UM; the BLADE correction is fitted
+    there and applied to all bins. n_counts > 0, hole filling, components and BLADE
+    as in run_buffer.
     Writes {sample}_buffer_imagemask.json and {sample}_filtered_bins_imagemask.parquet."""
     import anndata
     row = SAMPLES.loc[sample]
@@ -290,12 +325,17 @@ def run_image_mask(sample):
         "n_counts": raw["n_counts"][inside].astype(np.float64),
     })
     obs.index = obs["array_row"].astype(str) + "_" + obs["array_col"].astype(str)
+    # an externally supplied distance column is reused as-is by identify_analysis_buffer_from_filtered
+    full = distance_to_tissue_edge(raw, inside)
+    obs["distance_to_border"] = np.where(full <= TISSUE_FIT_MAX_DISTANCE_UM, full, np.nan)
+    obs["distance_full_um"] = full
     adata = anndata.AnnData(obs=obs)
     adata.uns["bosperrus"] = {"technology": row["technology"], "bin_size_um": RESOLUTION_UM, "path": str(row["path"])}
     _log(f"{int(inside.sum()):,} raw bins inside the image mask "
          f"({int((obs['n_counts'] > 0).sum()):,} with counts)")
 
-    filtered, buffer_json = run_buffer(sample, row["technology"], row["path"], adata=adata, footprint="image_mask")
+    filtered, buffer_json = run_buffer(sample, row["technology"], row["path"], adata=adata,
+                                     footprint="image_mask (distance to tissue edge, fit within 1 mm)")
     # same 8um grid as the npz -> mask coordinates by (array_row, array_col) lookup
     raw_index = pd.Series(np.arange(len(raw["array_row"])),
                           index=pd.MultiIndex.from_arrays([raw["array_row"], raw["array_col"]]))
@@ -306,6 +346,100 @@ def run_image_mask(sample):
     filtered.to_parquet(OUT_DIR / f"{sample}_filtered_bins_imagemask.parquet")
     (OUT_DIR / f"{sample}_buffer_imagemask.json").write_text(json.dumps(_jsonify(buffer_json), indent=1))
     _log(f"wrote {sample} image-mask outputs to {OUT_DIR}")
+
+
+def run_in_tissue(sample):
+    """run_buffer on Space Ranger's in_tissue bins (as the main run), but the
+    elbow is fitted only on bins within TISSUE_FIT_MAX_DISTANCE_UM of the
+    footprint edge (same fit range as --image-mask); the BLADE correction is
+    fitted there and applied to all bins.
+    Writes {sample}_buffer_intissue.json and {sample}_filtered_bins_intissue.parquet."""
+    row = SAMPLES.loc[sample]
+    adata = bosperrus.load_filtered(row["path"], row["technology"], RESOLUTION_UM)
+    # first pass only computes components + footprint distance (reused below with the same parameters)
+    bosperrus.identify_analysis_buffer_from_filtered(
+        adata, min_component_size=MIN_COMPONENT_SPOTS, max_hole_area_um2=MAX_HOLE_AREA_UM2,
+    )
+    full = adata.obs["distance_to_border"].to_numpy()
+    adata.obs["distance_full_um"] = full
+    adata.obs["distance_to_border"] = np.where(full <= TISSUE_FIT_MAX_DISTANCE_UM, full, np.nan)
+    filtered, buffer_json = run_buffer(sample, row["technology"], row["path"], adata=adata,
+                                       footprint="in_tissue (fit within 1 mm)")
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    filtered.to_parquet(OUT_DIR / f"{sample}_filtered_bins_intissue.parquet")
+    (OUT_DIR / f"{sample}_buffer_intissue.json").write_text(json.dumps(_jsonify(buffer_json), indent=1))
+    _log(f"wrote {sample} in_tissue outputs to {OUT_DIR}")
+
+
+def min_component_bins(resolution):
+    """MIN_COMPONENT_SPOTS (set at RESOLUTION_UM) as the same area at another bin size."""
+    return int(round(MIN_COMPONENT_SPOTS * (RESOLUTION_UM / resolution) ** 2))
+
+
+def load_raw(sample, resolution):
+    """Raw bins of the whole capture area at `resolution` with their image-mask coordinates
+    ({sample}_diffusion_{res}um.npz; written here if missing -- the 8um one by the main run)."""
+    npz_path = OUT_DIR / f"{sample}_diffusion_{resolution:g}um.npz"
+    if not npz_path.exists():
+        row = SAMPLES.loc[sample]
+        _, data = run_diffusion(row["technology"], row["path"], json.loads(row["mask_kwargs"]), resolution,
+                                return_data=True)
+        np.savez_compressed(
+            npz_path, mask=data["mask"], mask_pixel_size_um=data["mask_pixel_size_um"],
+            array_row=data["array_row"].astype(np.int32), array_col=data["array_col"].astype(np.int32),
+            mask_row=data["mask_row"].astype(np.float32), mask_col=data["mask_col"].astype(np.float32),
+            distance_um=data["distance_um"].astype(np.float32), n_counts=data["n_counts"].astype(np.float32),
+        )
+    return dict(np.load(npz_path))
+
+
+def run_tissue_edge(sample, resolution):
+    """Panel a only, at any bin size: every raw bin inside the image mask (zero-count bins
+    kept -- at 2um many tissue bins have no counts, and dropping them would bias the profile),
+    elbow vs. distance to the whole image mask's edge within TISSUE_FIT_MAX_DISTANCE_UM,
+    no BLADE. Run at 8 and 2um with identical settings for the resolution check.
+    Writes {sample}_buffer_tissueedge_{res}um.json and {sample}_filtered_bins_tissueedge_{res}um.parquet."""
+    import anndata
+    raw = load_raw(sample, resolution)
+    inside = raw["distance_um"] == 0
+    full = distance_to_tissue_edge(raw, inside)
+    obs = pd.DataFrame({
+        "array_row": raw["array_row"][inside].astype(np.int64), "array_col": raw["array_col"][inside].astype(np.int64),
+        "n_counts": raw["n_counts"][inside].astype(np.float64),
+        "distance_to_border": np.where(full <= TISSUE_FIT_MAX_DISTANCE_UM, full, np.nan),
+    })
+    obs.index = obs["array_row"].astype(str) + "_" + obs["array_col"].astype(str)
+    adata = anndata.AnnData(obs=obs)
+    adata.uns["bosperrus"] = {"bin_size_um": resolution}
+    min_bins = min_component_bins(resolution)
+    _log(f"{int(inside.sum()):,} bins inside the image mask at {resolution:g}um "
+         f"({int((obs['n_counts'] > 0).sum()):,} with counts); min component {min_bins:,} bins")
+    bosperrus.identify_analysis_buffer_from_filtered(
+        adata, n_counts_key=None, min_component_size=min_bins, max_hole_area_um2=None, rising_only=True,
+    )
+    components = adata.obs["components"].to_numpy()
+    buffer = adata.obs["analysis_buffer"].to_numpy()
+    per_component = {}
+    for label, info in adata.uns["analysis_buffer_fit"]["per_component"].items():
+        member = components == label
+        per_component[int(label)] = {
+            **info, "pct_affected": float(buffer[member].mean() * 100), "n_bins": int(member.sum()),
+            "max_distance_um": float(np.nanmax(obs["distance_to_border"].to_numpy()[member])),
+        }
+        _log(f"  component {label}: {member.sum():,} bins, {info['best_fit_type']}, elbow {info['elbow_um']}")
+    suffix = f"_tissueedge_{resolution:g}um"
+    pd.DataFrame({
+        "array_row": obs["array_row"].astype(np.int32), "array_col": obs["array_col"].astype(np.int32),
+        "n_counts": obs["n_counts"].astype(np.float32), "components": components.astype(np.int32),
+        "distance_to_border": obs["distance_to_border"].astype(np.float32), "distance_full_um": full.astype(np.float32),
+        "analysis_buffer": buffer,
+    }).to_parquet(OUT_DIR / f"{sample}_filtered_bins{suffix}.parquet")
+    (OUT_DIR / f"{sample}_buffer{suffix}.json").write_text(json.dumps(_jsonify({
+        "sample": sample, "resolution_um": resolution, "min_component_size": min_bins,
+        "zero_count_bins_kept": True, "rising_only": True, "fit_max_distance_um": TISSUE_FIT_MAX_DISTANCE_UM,
+        "per_component": per_component,
+    }), indent=1))
+    _log(f"wrote {sample}{suffix} outputs to {OUT_DIR}")
 
 
 def run_ablation(sample):
@@ -328,9 +462,21 @@ if __name__ == "__main__":
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--ablation", action="store_true")
     mode.add_argument("--image-mask", action="store_true",
-                      help="border analysis on the raw bins inside the image mask (needs the main run's npz)")
+                      help="border analysis on the raw bins inside the image mask, distance to the tissue edge "
+                           "(needs the main run's npz)")
+    mode.add_argument("--in-tissue", action="store_true",
+                      help="border analysis on Space Ranger's in_tissue bins, distance to their footprint edge")
+    mode.add_argument("--tissue-edge", action="store_true",
+                      help="tissue-edge elbow only (zero-count bins kept, no BLADE) at --resolution")
+    parser.add_argument("--resolution", type=float, default=RESOLUTION_UM, help="with --tissue-edge: bin size (um)")
     args = parser.parse_args()
-    name = "ablation" if args.ablation else "image-mask" if args.image_mask else "main"
+    name = ("ablation" if args.ablation else "image-mask" if args.image_mask
+            else "in-tissue" if args.in_tissue else "tissue-edge" if args.tissue_edge else "main")
     _log(f"=== {args.sample} ({name}) ===")
-    {"ablation": run_ablation, "image-mask": run_image_mask, "main": run_main}[name](args.sample)
+    if name == "image-mask":
+        run_image_mask(args.sample)
+    elif name == "tissue-edge":
+        run_tissue_edge(args.sample, args.resolution)
+    else:
+        {"ablation": run_ablation, "in-tissue": run_in_tissue, "main": run_main}[name](args.sample)
     _log("done")

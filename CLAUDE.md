@@ -23,7 +23,7 @@ and `result_plots/`:
 | `microns` | 2 (panel) | MICrONS connectome analysis buffer (more code/data in `/home/woody/iwbn/iwbn007h/MICrONS_data/`) |
 | `computational_effects` | 4 | MIBI-TOF fits across graph types/measures; edge-truncation root causes |
 | `correction_benchmark` | 5 | sphere benchmark (BOSPERRUS additive/multiplicative/log vs. linear/spline detrending vs. SERN), sanity checks, runtime scaling |
-| `archive` | — | superseded or removed-from-paper code, notebooks and outputs |
+| `archive` | — | superseded or removed-from-paper code, notebooks and outputs -- local only, gitignored (untracked 2026-10-27) |
 
 Results notes (what was found, decisions, to-dos) live outside this repo, one
 file per topic: `../notes/<topic>.md`, indexed by `../RESULTS.md`. Each
@@ -57,7 +57,7 @@ truncated_graphs/
 └── mibitof_coords/, data/      inputs (data dirs gitignored via `*data*`)
 ```
 
-The core dependency is the **bosperrus package** (sibling checkout `../bosperrus-package/`, installed editable into the pixi env). `src/computational_effects/border_effects_kNN_del.py` still has a stale `sys.path.append("/data/bionets/je30bery/bosperrus-package")` (harmless, the installed package is used); `src/correction_benchmark/sern.py` appends `../../bosperrus-package/` relative to the cwd, which resolves only with `cwd=src/`.
+The core dependency is the **bosperrus package** (sibling checkout `../bosperrus-package/`, installed editable into the pixi env via `pyproject.toml`; see Dependencies). `src/computational_effects/border_effects_kNN_del.py` still has a stale `sys.path.append("/data/bionets/je30bery/bosperrus-package")` (harmless, the installed package is used); `src/correction_benchmark/sern.py` appends `../../bosperrus-package/` relative to the cwd, which resolves only with `cwd=src/`.
 
 ## bosperrus Package Architecture
 
@@ -134,9 +134,6 @@ All data-containing directories (`SNAP_data/`, `CD34_data/`, `TWOMBLI_data/`, `g
 
 ## Dependencies
 
-Managed via `pixi` (see `pyproject.toml`'s `[tool.pixi.*]` tables and `pixi.lock`), not `uv` — this project mixes conda-forge dependencies (currently just `graph-tool`, which has no usable PyPI wheel) with regular PyPI dependencies (`bosperrus`, `squidpy`, `numpy`, `scipy`, `pandas`, `scikit-learn`, `networkx`, `tifffile`, `joblib`, `tqdm`, `matplotlib`, ...) in one resolved environment. `requires-python` is capped at `<3.13` — pixi otherwise resolves to the newest available Python satisfying `[project]`'s constraint, and the broader scientific stack (squidpy/scanpy/numba) isn't yet reliably compatible with very new Python versions.
+Managed via `pixi` (see `pyproject.toml`'s `[tool.pixi.*]` tables and `pixi.lock`), not `uv` — this project mixes conda-forge dependencies (currently just `graph-tool`, which has no usable PyPI wheel) with regular PyPI dependencies (`squidpy`, `numpy`, `scipy`, `pandas`, `scikit-learn`, `networkx`, `tifffile`, `joblib`, `tqdm`, `matplotlib`, ...) in one resolved environment. `requires-python` is capped at `<3.13` — pixi otherwise resolves to the newest available Python satisfying `[project]`'s constraint, and the broader scientific stack (squidpy/scanpy/numba) isn't yet reliably compatible with very new Python versions.
 
-`bosperrus` is a normal PyPI dependency here. Only install it editable from the local checkout if you need to test unreleased package changes:
-```bash
-pixi run pip install -e /home/woody/iwbn/iwbn007h/bosperrus/bosperrus-package/
-```
+`bosperrus` is installed **editable from the local checkout** (`[tool.pixi.pypi-dependencies] bosperrus = { path = "../bosperrus-package", editable = true }`): every `pixi run` uses whatever branch is currently checked out in `../bosperrus-package/` -- no release, no `PYTHONPATH` needed. Keep it this way until the paper is done (no PyPI version bumps for paper work); pin a released version only at the end. Check which branch is checked out there before runs whose results depend on unmerged package changes (e.g. `RisingPiecewiseLinearFit` on `feature/rising-piecewise`).
