@@ -9,7 +9,8 @@ random positions where every bin of the window is
   effect reaches in; real-edge elbows are <= ~300 um except false ones).
 Each window's bins go through bosperrus.identify_analysis_buffer_from_filtered
 (n_counts > 0, hole filling, components, ConstantFit vs RisingPiecewiseLinearFit, m > 0
-rule) with the distance to the window's own edge supplied as distance_to_border.
+rule) with the distance to the window's own edge supplied as distance_to_border, fitted
+within TISSUE_FIT_MAX_DISTANCE_UM like the tissue edges.
 Effect strength and half-life come from border_criterion.criterion_metrics, the
 same function used for the real tissue-edge fits; their distribution over the
 windows is the null of border_criterion.window_p_value.
@@ -36,7 +37,8 @@ import bosperrus
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from border_criterion import criterion_metrics  # noqa: E402
 from st_precompute import (  # noqa: E402
-    MAX_HOLE_AREA_UM2, MIN_COMPONENT_SPOTS, OUT_DIR, RESOLUTION_UM, SAMPLES, distance_to_tissue_edge, load_raw,
+    MAX_HOLE_AREA_UM2, MIN_COMPONENT_SPOTS, OUT_DIR, RESOLUTION_UM, SAMPLES, TISSUE_FIT_MAX_DISTANCE_UM,
+    distance_to_tissue_edge, load_raw,
     min_component_bins,
 )
 
@@ -67,7 +69,8 @@ def fit_window(row, col, n_counts, r0, c0, k, resolution=RESOLUTION_UM, keep_zer
     in_win = (row >= r0) & (row < r0 + k) & (col >= c0) & (col < c0 + k)
     wr, wc = row[in_win], col[in_win]
     obs = pd.DataFrame({"array_row": wr, "array_col": wc, "n_counts": n_counts[in_win].astype(np.float64)})
-    obs["distance_to_border"] = np.minimum.reduce([wr - r0, r0 + k - 1 - wr, wc - c0, c0 + k - 1 - wc]) * resolution
+    dist = np.minimum.reduce([wr - r0, r0 + k - 1 - wr, wc - c0, c0 + k - 1 - wc]) * resolution
+    obs["distance_to_border"] = np.where(dist <= TISSUE_FIT_MAX_DISTANCE_UM, dist, np.nan)
     obs.index = obs["array_row"].astype(str) + "_" + obs["array_col"].astype(str)
     adata = anndata.AnnData(obs=obs)
     adata.uns["bosperrus"] = {"bin_size_um": resolution}
