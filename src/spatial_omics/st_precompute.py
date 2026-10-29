@@ -6,7 +6,7 @@ of bosperrus):
 
 - border effect: bosperrus.load_filtered + identify_analysis_buffer_from_filtered
   on the pipeline's own tissue-filtered bins (n_counts > 0, per connected
-  component), plus BLADE on raw and ExponentialSaturationFit-corrected counts.
+  component), plus BLADE.
 - diffusion: bosperrus.quantify_diffusion_from_raw on the raw, whole-capture-
   area bins vs. an image-only tissue mask (segmentation parameters per sample
   from st_samples.csv).
@@ -34,7 +34,7 @@ Writes to results/spatial_omics/st_reroll/:
                                     hole positions without a bin): array_row, array_col,
                                     n_counts, components, virtual, border, distance_to_border (um),
                                     analysis_buffer, blade_layer, in_blade_buffer,
-                                    in_blade_buffer_corrected, mask_row, mask_col
+                                    mask_row, mask_col
     {sample}_buffer.json            per-component elbow + BLADE thresholds
     {sample}_diffusion_{res}um.json quantify_diffusion_from_raw's result dict
     {sample}_diffusion_8um.npz      mask, display image, and every raw bin's
@@ -117,9 +117,9 @@ def _nearest_value(row, col, values, query_row, query_col):
 
 
 def run_buffer(sample, technology, path, adata=None, footprint="pipeline"):
-    """identify_analysis_buffer_from_filtered + BLADE (raw and exp-sat
-    corrected) per component, both on the same tissue footprint: n_counts > 0
-    bins with small enclosed holes (<= MAX_HOLE_AREA_UM2) filled.
+    """identify_analysis_buffer_from_filtered + BLADE per component, both on the
+    same tissue footprint: n_counts > 0 bins with small enclosed holes
+    (<= MAX_HOLE_AREA_UM2) filled.
 
     Returns the filtered-bins DataFrame -- one row per filtered bin plus one
     row per filled hole position without a bin (virtual=True, n_counts NaN;
@@ -149,16 +149,12 @@ def run_buffer(sample, technology, path, adata=None, footprint="pipeline"):
     array_row, array_col = obs["array_row"].to_numpy(), obs["array_col"].to_numpy()
     n_counts, components = obs["n_counts"].to_numpy(), obs["components"].to_numpy()
     distance = obs["distance_to_border"].to_numpy()
-    # uncapped distance for applying the BLADE correction (the fits only see bins within the cap)
-    full_distance = obs["distance_full_um"].to_numpy() if "distance_full_um" in obs else None
     buffer = obs["analysis_buffer"].to_numpy()
 
     blade_layer = np.zeros(len(obs), dtype=np.int32)
     v_layer = np.zeros(len(v_row), dtype=np.int32)
     in_blade = np.zeros(len(obs), dtype=bool)
-    in_blade_corr = np.zeros(len(obs), dtype=bool)
     v_in_blade = np.zeros(len(v_row), dtype=bool)
-    v_in_blade_corr = np.zeros(len(v_row), dtype=bool)
     per_component = {}
     for label, info in fit_info["per_component"].items():
         member, v_member = components == label, v_comp == label
@@ -166,29 +162,15 @@ def run_buffer(sample, technology, path, adata=None, footprint="pipeline"):
              f"{info['best_fit_type']}; BLADE ...")
         peel = dict(connectivity=BLADE_CONNECTIVITY, extra_row=v_row[v_member], extra_col=v_col[v_member])
         sweep, blade = peel_sweep(array_row[member], array_col[member], {"n_counts": n_counts[member]}, **peel)
-        exp_sat = bosperrus.ExponentialSaturationFit(n_counts[member], distance[member])
-        n_counts_corrected = np.asarray(exp_sat.fit_correct())
-        if full_distance is not None and exp_sat._converged:
-            # fitted on the capped distances, applied to every bin (no step at the cap):
-            # S + asymptote - model(d) = S + a * exp(-b * d)
-            p = exp_sat.params
-            n_counts_corrected = n_counts[member] + p["exponential_saturation_a"] * np.exp(
-                -p["exponential_saturation_b"] * full_distance[member])
-        # bins without a distance (none in the current runs) are not fit: keep their raw counts
-        n_counts_corrected = np.where(np.isfinite(n_counts_corrected), n_counts_corrected, n_counts[member])
-        sweep_corr, blade_corr = peel_sweep(array_row[member], array_col[member],
-                                            {"n_counts_corrected": n_counts_corrected}, **peel)
         # BLADE buffer depth: number of layers removed (p < 0.05); NaN if the sweep never reached p >= 0.05
-        n_removed, n_removed_corr = blade["n_counts"], blade_corr["n_counts_corrected"]
+        n_removed = blade["n_counts"]
 
         layer = _blade_layer(np.concatenate([array_row[member], v_row[v_member]]),
                              np.concatenate([array_col[member], v_col[v_member]]))
         n_real = int(member.sum())
         blade_layer[member], v_layer[v_member] = layer[:n_real], layer[n_real:]
         flag = (layer <= n_removed) if np.isfinite(n_removed) else np.zeros(len(layer), bool)
-        flag_corr = (layer <= n_removed_corr) if np.isfinite(n_removed_corr) else np.zeros(len(layer), bool)
         in_blade[member], v_in_blade[v_member] = flag[:n_real], flag[n_real:]
-        in_blade_corr[member], v_in_blade_corr[v_member] = flag_corr[:n_real], flag_corr[n_real:]
 
         bsp_thresh_um = info["elbow_um"]  # None unless a piecewise fit with m > 0 won
         per_component[int(label)] = {
@@ -198,13 +180,9 @@ def run_buffer(sample, technology, path, adata=None, footprint="pipeline"):
             "n_filled_hole_bins": int((member & (n_counts <= 0)).sum()),
             "n_hole_positions_without_bin": int(v_member.sum()),
             "blade_thresh": n_removed,  # layers removed by BLADE (8-connectivity peel layers)
-            "blade_thresh_corrected": n_removed_corr,
             "blade_thresh_um": n_removed * RESOLUTION_UM,
-            "blade_thresh_corrected_um": n_removed_corr * RESOLUTION_UM,
-            "exp_sat_converged": bool(exp_sat._converged),
             "max_distance_um": float(np.nanmax(distance[member])),  # distance range the elbow fit saw
             "blade_sweep": sweep.to_dict(orient="list"),
-            "blade_sweep_corrected": sweep_corr.to_dict(orient="list"),
         }
 
     buffer_json = {
@@ -220,7 +198,7 @@ def run_buffer(sample, technology, path, adata=None, footprint="pipeline"):
         "virtual": False,
         "border": obs["border"].to_numpy(), "distance_to_border": distance.astype(np.float64),
         "analysis_buffer": buffer, "blade_layer": blade_layer,
-        "in_blade_buffer": in_blade, "in_blade_buffer_corrected": in_blade_corr,
+        "in_blade_buffer": in_blade,
     })
     if len(v_row):
         real = components >= 0
@@ -230,7 +208,7 @@ def run_buffer(sample, technology, path, adata=None, footprint="pipeline"):
             "border": False, "distance_to_border": np.nan,
             # display only (virtual positions are never fit): the nearest real bin's buffer flag
             "analysis_buffer": _nearest_value(array_row[real], array_col[real], buffer[real], v_row, v_col),
-            "blade_layer": v_layer, "in_blade_buffer": v_in_blade, "in_blade_buffer_corrected": v_in_blade_corr,
+            "blade_layer": v_layer, "in_blade_buffer": v_in_blade,
         })
         filtered = pd.concat([filtered, virtual_df], ignore_index=True)
     return filtered, buffer_json
@@ -312,9 +290,8 @@ def run_image_mask(sample):
     quantify_diffusion_from_raw; read from the main run's {sample}_diffusion_8um.npz)
     instead of the pipeline's own tissue call. The elbow is fitted against the
     distance to the edge of the whole image mask (cuts by the capture area are not a
-    border), on bins within TISSUE_FIT_MAX_DISTANCE_UM; the BLADE correction is fitted
-    there and applied to all bins. n_counts > 0, hole filling, components and BLADE
-    as in run_buffer.
+    border), on bins within TISSUE_FIT_MAX_DISTANCE_UM. n_counts > 0, hole filling,
+    components and BLADE as in run_buffer.
     Writes {sample}_buffer_imagemask.json and {sample}_filtered_bins_imagemask.parquet."""
     import anndata
     row = SAMPLES.loc[sample]
@@ -332,7 +309,6 @@ def run_image_mask(sample):
     # an externally supplied distance column is reused as-is by identify_analysis_buffer_from_filtered
     full = distance_to_tissue_edge(raw, inside)
     obs["distance_to_border"] = np.where(full <= TISSUE_FIT_MAX_DISTANCE_UM, full, np.nan)
-    obs["distance_full_um"] = full
     adata = anndata.AnnData(obs=obs)
     adata.uns["bosperrus"] = {"technology": row["technology"], "bin_size_um": RESOLUTION_UM, "path": str(row["path"])}
     _log(f"{int(inside.sum()):,} raw bins inside the image mask "
@@ -355,8 +331,7 @@ def run_image_mask(sample):
 def run_in_tissue(sample):
     """run_buffer on Space Ranger's in_tissue bins (as the main run), but the
     elbow is fitted only on bins within TISSUE_FIT_MAX_DISTANCE_UM of the
-    footprint edge (same fit range as --image-mask); the BLADE correction is
-    fitted there and applied to all bins.
+    footprint edge (same fit range as --image-mask).
     Writes {sample}_buffer_intissue.json and {sample}_filtered_bins_intissue.parquet."""
     row = SAMPLES.loc[sample]
     adata = bosperrus.load_filtered(row["path"], row["technology"], RESOLUTION_UM)
@@ -365,7 +340,6 @@ def run_in_tissue(sample):
         adata, min_component_size=MIN_COMPONENT_SPOTS, max_hole_area_um2=MAX_HOLE_AREA_UM2,
     )
     full = adata.obs["distance_to_border"].to_numpy()
-    adata.obs["distance_full_um"] = full
     adata.obs["distance_to_border"] = np.where(full <= TISSUE_FIT_MAX_DISTANCE_UM, full, np.nan)
     filtered, buffer_json = run_buffer(sample, row["technology"], row["path"], adata=adata,
                                        footprint="in_tissue (fit within 250 um)")

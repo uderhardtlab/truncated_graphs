@@ -17,8 +17,7 @@ def peel_sweep(array_row, array_col, counts_by_label, min_group_size=30, connect
                extra_row=None, extra_col=None):
     """Peel border layers off a (array_row, array_col) grid one at a time,
     Welch-t-testing each peeled layer against the remaining interior for
-    every count array in counts_by_label (so e.g. raw vs. BOSPERRUS-corrected
-    counts are compared against the same peel-layer masks).
+    every count array in counts_by_label (all against the same peel-layer masks).
 
     extra_row/extra_col: grid positions that belong to the tissue for peeling
     (e.g. filled hole positions without a bin) but have no counts -- they
