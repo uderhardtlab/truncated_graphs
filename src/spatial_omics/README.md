@@ -7,7 +7,7 @@ Visium HD and Stereo-seq (STOmics) at 8 × 8 µm. One shared pipeline for both s
   (`identify_analysis_buffer_from_filtered(rising_only=True)`) vs. distance to the tissue edge of the image
   mask, fitted within 250 µm (`--image-mask`; Space Ranger `in_tissue` bins for the supplement: `--in-tissue`;
   elbow only at another bin size for the 8 vs. 2 µm check: `--tissue-edge --resolution R`), plus BLADE
-  (`blade.py`) on raw and corrected counts; BLADE on the `in_tissue` bins corrected from the image border
+  (`blade.py`) on raw and corrected counts; spots discarded by BLADE (`in_tissue`) vs. bosperrus (image border)
   (`--blade-image-border`). Writes `results/spatial_omics/st_reroll/` (gitignored).
   Run per sample via `jobs/spatial_omics_st_precompute.sbatch <sample> [mode]`.
 - `border_criterion.py` — when a rising elbow counts as a border effect (effect strength and half-life).
