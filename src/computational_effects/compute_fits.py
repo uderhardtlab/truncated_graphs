@@ -16,7 +16,9 @@ import sys
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
+from scipy.spatial import cKDTree
 from tqdm import tqdm
 
 ROOT = Path(__file__).resolve().parent.parent.parent
@@ -30,29 +32,59 @@ GRAPH_TYPES = [
     "delaunay",
     "knn_k=5", "knn_k=10", "knn_k=15",
     "rnn_r=0.02", "rnn_r=0.03", "rnn_r=0.04", "rnn_r=0.05",
+    "rnn_k=5", "rnn_k=10", "rnn_k=15",
 ]
 COORDS_PICKLE = ROOT / "mibitof_coords" / "coords.pickle"
 RESULTS_DIR   = ROOT / "results" / "computational_effects" / "mibitof_fits"
 
 
-def _graph_kwargs(graph_type):
+def _knn_radius(coords, k):
+    """Mean distance to the k-th nearest neighbour: an rNN with this radius has a
+    mean degree of about k, so rnn_k=<k> is density-matched to knn_k=<k>."""
+    dist, _ = cKDTree(coords).query(coords, k=k + 1)  # column 0 is the point itself
+    return float(dist[:, k].mean())
+
+
+def _graph_kwargs(graph_type, coords):
     parts = graph_type.split("_")
     if parts[0] == "delaunay":
         return None
     key, val = parts[1][0], parts[1].split("=")[-1]
+    if parts[0] == "rnn" and key == "k":
+        return {"r": _knn_radius(coords, int(val))}
     return {key: int(val) if key != "r" else float(val)}
 
 
-def fit_dataset(dataset, coordinates, graph_type):
+def normalise_coords(coordinates):
+    """Shift to the origin and scale the longer side to 1 -- isotropic: one factor
+    for both axes, no stretching."""
     lo, hi = coordinates.min(axis=0), coordinates.max(axis=0)
-    coords = (coordinates - lo) / (hi - lo)
+    return (coordinates - lo) / (hi - lo).max()
+
+
+def load_datasets(coords_pickle=COORDS_PICKLE):
+    with open(coords_pickle, "rb") as f:
+        datasets = pickle.load(f)
+    datasets.pop("glioma_mibitof:CHOP_907_R1C6_whole_cell.tiff", None)
+    # mibitof_coords/coords.pickle also carries 35 squidpy Visium demo samples
+    # (sq_visium:*) despite the name -- Visium spots sit on a regular grid,
+    # unlike organic MIBI-TOF cell centroids, and measurably skew border-effect
+    # sign/direction on sparse graphs (see figure3 investigation). Visium gets
+    # its own dedicated treatment elsewhere; exclude it here for a clean
+    # MIBI-TOF-only figure3.
+    return {k: v for k, v in datasets.items() if not k.startswith("sq_visium:")}
+
+
+def fit_dataset(dataset, coordinates, graph_type):
+    coords = normalise_coords(coordinates)
+    graph_kwargs = _graph_kwargs(graph_type, coords)
     try:
         flow = Flow.from_coords(
             coordinates=coords,
             distance_fn=distance_to_convex_hull,
             measures=MEASURES,
             graph_type=graph_type.split("_")[0],
-            graph_kwargs=_graph_kwargs(graph_type),
+            graph_kwargs=graph_kwargs,
         )
         flow.flow()
     except ValueError as e:
@@ -62,6 +94,9 @@ def fit_dataset(dataset, coordinates, graph_type):
     result["dataset"]   = dataset
     result["num_edges"] = len(flow._edge_list)
     result["num_nodes"] = len(coordinates)
+    if graph_type.startswith("rnn_k="):
+        result["r"] = graph_kwargs["r"]
+        result["mean_degree"] = 2 * len(flow._edge_list) / len(coordinates)  # undirected edges
     return result
 
 
@@ -85,16 +120,7 @@ def compute_fits(datasets, graph_type):
 
 
 def main(graph_types=GRAPH_TYPES, coords_pickle=COORDS_PICKLE):
-    with open(coords_pickle, "rb") as f:
-        datasets = pickle.load(f)
-    datasets.pop("glioma_mibitof:CHOP_907_R1C6_whole_cell.tiff", None)
-    # mibitof_coords/coords.pickle also carries 35 squidpy Visium demo samples
-    # (sq_visium:*) despite the name -- Visium spots sit on a regular grid,
-    # unlike organic MIBI-TOF cell centroids, and measurably skew border-effect
-    # sign/direction on sparse graphs (see figure3 investigation). Visium gets
-    # its own dedicated treatment elsewhere; exclude it here for a clean
-    # MIBI-TOF-only figure3.
-    datasets = {k: v for k, v in datasets.items() if not k.startswith("sq_visium:")}
+    datasets = load_datasets(coords_pickle)
 
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     frames = []

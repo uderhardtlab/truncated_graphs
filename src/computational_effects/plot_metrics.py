@@ -1,9 +1,19 @@
 """
 Figure 3: border-effect fit summary across measures, for one representative
-graph type per family (Delaunay, kNN k=10, rNN r=0.03 -- the graph types
-within a family are similar enough that showing all 8 was redundant).
+graph type per family (Delaunay, kNN k=10, rNN with the radius matched to
+kNN k=10 -- the graph types within a family are similar enough that showing
+all 11 was redundant).
 
-Each (family, measure) cell is a mini "jointplot":
+Columns are measures, ordered from local to global; PageRank is left out
+(its effect follows degree on every graph type, and spatial omics tools don't
+use it -- its fits are still in the CSVs). Rows are graph families.
+
+Above each column: a map of one example image coloured by that measure, with
+image and graph type chosen in example_scores.py. Colours are clipped to the
+image's 2nd-98th percentile; the colour bar has no numbers, since only the
+spatial pattern matters.
+
+Each (measure, family) cell is a mini "jointplot":
   - main panel: every non-Constant dataset's fitted curve. y is anchored to
     observed_effect_strength (not min-max normalized), so y(0) at the
     border equals observed_effect_strength exactly and y(d_max) at the
@@ -24,10 +34,13 @@ effect_strength are identically 0 for every such row (no spread, so no
 real KDE is possible) and are drawn as a narrow spike at 0 instead, with
 the same area-equals-share convention.
 
-y-axis is not shared/fixed across panels -- each cell auto-scales
-symmetrically around 0 to its own 97th-percentile |effect_strength| (not the
-true max, which a handful of sign-crossing outliers could otherwise inflate),
-since different measures have very different natural effect magnitudes.
+The y-axis is shared within a column, so graph families are directly
+comparable for one measure, but not across columns, since different measures
+have very different natural effect magnitudes (one shared axis would let
+betweenness squash degree and clustering to a line). Each column scales
+symmetrically around 0 to the largest 97th-percentile |effect_strength| of its
+cells (not the true max, which a handful of sign-crossing outliers could
+otherwise inflate).
 
 Run:
     cd truncated_graphs/
@@ -48,20 +61,21 @@ from matplotlib.gridspec import GridSpec
 from scipy.stats import gaussian_kde, norm
 
 from bosperrus.fit import PiecewiseLinearFit, ExponentialSaturationFit, MichaelisMentenFit
-from compute_fits import MEASURES as _MEASURES
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 
-MEASURES = sorted(_MEASURES)
+MEASURES = ["degree", "clustering", "closeness", "betweenness"]
 
-REPRESENTATIVE = {"Delaunay": "delaunay", "kNN (k=10)": "knn_k=10", "rNN (r=0.03)": "rnn_r=0.03"}
+REPRESENTATIVE = {"Delaunay": "delaunay", "kNN (k=10)": "knn_k=10", "rNN (mean deg. 10)": "rnn_k=10"}
 FAMILIES = list(REPRESENTATIVE.keys())
+FAMILY_OF = {gt: family for family, gt in REPRESENTATIVE.items()}
 
 CURVE_FIT_ORDER = ["Piecewise Linear Fit", "Exponential Saturation Fit", "Michaelis-Menten Fit"]
 
-# coordinates are min-max normalized to the unit square before
-# distance_to_convex_hull, so d_max is consistent across datasets (measured
-# 0.483 +/- 0.017 over an 80-dataset random sample) -- used as a shared
+# coordinates are scaled so the longer image side is 1 before
+# distance_to_convex_hull; the images are near-square (median aspect 1.001), so
+# d_max is consistent across datasets (measured 0.483 +/- 0.017 over an
+# 80-dataset random sample) -- used as a shared
 # stand-in for each dataset's own d_max, since it isn't stored in the
 # per-graph-type CSVs.
 D_MAX_APPROX = 0.483
@@ -120,7 +134,19 @@ def kde_or_none(values, grid):
     return gaussian_kde(values)(grid)
 
 
-def plot_cell(ax_main, ax_top, ax_right, sub, fit_palette):
+def y_abs_max(sub):
+    """Half-height of a cell's y-axis."""
+    non_baseline = sub[sub["best_fit_type"] != "Constant Fit"]
+    # 97th percentile rather than the true max: observed_effect_strength is only
+    # bounded to [-1, 1] when the border and center values share a sign -- a
+    # curve that crosses zero between them can spike much further out, and a
+    # handful of such outliers would otherwise dictate the whole axis, squeezing
+    # everything else into a fraction of the panel.
+    y = np.percentile(non_baseline["observed_effect_strength"].abs(), 97) if len(non_baseline) else 0.05
+    return max(y, 0.05) * 1.1
+
+
+def plot_cell(ax_main, ax_top, ax_right, sub, fit_palette, y_max):
     n_total = len(sub)
     non_baseline = sub[sub["best_fit_type"] != "Constant Fit"]
 
@@ -132,16 +158,9 @@ def plot_cell(ax_main, ax_top, ax_right, sub, fit_palette):
         shape = (S - c_center) / (c_border - c_center + _EPS)
         segments_by_model[model].append(np.column_stack([X_GRID, shape * row["observed_effect_strength"]]))
 
-    # 97th percentile rather than the true max: observed_effect_strength is only
-    # bounded to [-1, 1] when the border and center values share a sign -- a
-    # curve that crosses zero between them can spike much further out, and a
-    # handful of such outliers would otherwise dictate the whole axis, squeezing
-    # everything else into a fraction of the panel.
-    y_abs_max = np.percentile(non_baseline["observed_effect_strength"].abs(), 97) if len(non_baseline) else 0.05
-    y_abs_max = max(y_abs_max, 0.05) * 1.1
-    es_grid = np.linspace(-y_abs_max, y_abs_max, 100)
+    es_grid = np.linspace(-y_max, y_max, 100)
     spike_sigma_x = SPIKE_SIGMA_FRAC * D_MAX_APPROX
-    spike_sigma_y = SPIKE_SIGMA_FRAC * y_abs_max
+    spike_sigma_y = SPIKE_SIGMA_FRAC * y_max
 
     for model in CURVE_FIT_ORDER:
         segs = segments_by_model[model]
@@ -184,7 +203,7 @@ def plot_cell(ax_main, ax_top, ax_right, sub, fit_palette):
 
     ax_main.axhline(0, color="#898781", lw=0.7, zorder=0)
     ax_main.set_xlim(0, X_AXIS_MAX)
-    ax_main.set_ylim(-y_abs_max, y_abs_max)
+    ax_main.set_ylim(-y_max, y_max)
     ax_main.spines[["top", "right"]].set_visible(False)
     ax_main.tick_params(labelsize=6)
     set_three_ticks(ax_main)
@@ -192,25 +211,48 @@ def plot_cell(ax_main, ax_top, ax_right, sub, fit_palette):
         ax.axis("off")
 
 
-def plot_metrics(data, fit_palette):
+def plot_example(ax_map, ax_cbar, ex):
+    """Map of the example image coloured by one measure, clipped to its
+    2nd-98th percentile; y inverted to match image orientation."""
+    vmin, vmax = np.percentile(ex["score"], [2, 98])
+    sc = ax_map.scatter(ex["x"], ex["y"], c=ex["score"].clip(vmin, vmax), cmap="viridis",
+                        vmin=vmin, vmax=vmax, s=0.6, lw=0)  # vector: stays sharp when zoomed
+    ax_map.set_aspect("equal")
+    ax_map.invert_yaxis()
+    ax_map.axis("off")
+    ax_map.text(0.5, -0.02, FAMILY_OF[ex["graph_type"].iloc[0]], transform=ax_map.transAxes,
+                ha="center", va="top", fontsize=6.5)
+    cbar = plt.colorbar(sc, cax=ax_cbar, ticks=[])
+    cbar.outline.set_linewidth(0.4)
+    ax_cbar.text(0.5, 1.02, "high", transform=ax_cbar.transAxes, ha="center", va="bottom", fontsize=5.5)
+    ax_cbar.text(0.5, -0.02, "low", transform=ax_cbar.transAxes, ha="center", va="top", fontsize=5.5)
+
+
+def plot_metrics(data, examples, fit_palette):
     n_rows, n_cols = len(FAMILIES), len(MEASURES)
-    fig = plt.figure(figsize=(9, 6))
-    gs = GridSpec(n_rows * 2, n_cols * 2, figure=fig,
-                  height_ratios=[0.7, 3.2] * n_rows, width_ratios=[3.2, 0.7] * n_cols,
-                  hspace=0.08, wspace=0.08)
+    fig = plt.figure(figsize=(7.5, 6.6))
+    # row 0: example maps; then a gap row; then (top margin, main) per family
+    gs = GridSpec(n_rows * 2 + 2, n_cols * 2, figure=fig,
+                  height_ratios=[3.2, 0.35] + [0.6, 2.6] * n_rows, width_ratios=[3.2, 0.7] * n_cols,
+                  hspace=0.06, wspace=0.08)
 
-    for ri, family in enumerate(FAMILIES):
-        gt = REPRESENTATIVE[family]
-        for ci, measure in enumerate(MEASURES):
-            ax_main = fig.add_subplot(gs[ri * 2 + 1, ci * 2])
-            ax_top = fig.add_subplot(gs[ri * 2, ci * 2], sharex=ax_main)
-            ax_right = fig.add_subplot(gs[ri * 2 + 1, ci * 2 + 1], sharey=ax_main)
+    for ci, measure in enumerate(MEASURES):
+        ax_map = fig.add_subplot(gs[0, ci * 2])
+        cbar_gs = gs[0, ci * 2 + 1].subgridspec(3, 3, height_ratios=[0.15, 0.7, 0.15], width_ratios=[0.2, 0.25, 0.55])
+        plot_example(ax_map, fig.add_subplot(cbar_gs[1, 1]), examples[examples["measure"] == measure])
+        ax_map.set_title(measure, fontsize=9, pad=4)
 
-            sub = data[(data["measure"] == measure) & (data["graph_type"] == gt)]
-            plot_cell(ax_main, ax_top, ax_right, sub, fit_palette)
+        sub_col = data[data["measure"] == measure]
+        y_max = max(y_abs_max(sub_col[sub_col["graph_type"] == gt]) for gt in REPRESENTATIVE.values())
+        for ri, family in enumerate(FAMILIES):
+            row = 2 + ri * 2  # gridspec rows shifted by the example row + gap
+            ax_main = fig.add_subplot(gs[row + 1, ci * 2])
+            ax_top = fig.add_subplot(gs[row, ci * 2], sharex=ax_main)
+            ax_right = fig.add_subplot(gs[row + 1, ci * 2 + 1], sharey=ax_main)
 
-            if ri == 0:
-                ax_top.set_title(measure, fontsize=9, pad=4)
+            sub = sub_col[sub_col["graph_type"] == REPRESENTATIVE[family]]
+            plot_cell(ax_main, ax_top, ax_right, sub, fit_palette, y_max)
+
             if ci == 0:
                 ax_main.set_ylabel(family, fontsize=8, labelpad=4)
             if ri == n_rows - 1:
@@ -226,10 +268,11 @@ def main():
         fit_palette = json.load(f)
 
     data = load_data()
-    fig = plot_metrics(data, fit_palette)
+    examples = pd.read_csv(ROOT / "results" / "computational_effects" / "mibitof_fits" / "figure3_examples.csv")
+    fig = plot_metrics(data, examples, fit_palette)
 
     out = ROOT / "result_plots" / "computational_effects" / "mibitof_fits" / "figure3"
-    fig.savefig(str(out) + ".svg", format="svg", bbox_inches="tight")
+    fig.savefig(str(out) + ".svg", format="svg", bbox_inches="tight", dpi=600)  # dpi of the rasterized curve layers
     print(f"Saved {out}.svg")
     plt.close("all")
 

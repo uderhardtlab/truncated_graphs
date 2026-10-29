@@ -1,6 +1,6 @@
 #!/bin/bash
 # Figure 3 data: AIC fits per MIBI-TOF dataset/graph type.
-# One array task per graph type (8 total), each parallelizing across the
+# One array task per graph type (11 total), each parallelizing across the
 # ~1000 MIBI-TOF datasets internally via compute_fits.py's ProcessPoolExecutor.
 # Submit from anywhere with (on tinyfat, no GPU needed):
 #   sbatch.tinyfat jobs/computational_effects_compute_fits.sbatch
@@ -11,7 +11,7 @@
 #SBATCH --job-name=figure3-compute-fits
 #SBATCH --clusters=tinyfat
 #SBATCH --partition=broadwell256
-#SBATCH --array=0-7
+#SBATCH --array=0-10
 #SBATCH --cpus-per-task=24
 #SBATCH --mem=128G
 #SBATCH --time=12:00:00
@@ -20,7 +20,7 @@
 
 set -euo pipefail
 
-GRAPH_TYPES=(delaunay "knn_k=5" "knn_k=10" "knn_k=15" "rnn_r=0.02" "rnn_r=0.03" "rnn_r=0.04" "rnn_r=0.05")
+GRAPH_TYPES=(delaunay "knn_k=5" "knn_k=10" "knn_k=15" "rnn_r=0.02" "rnn_r=0.03" "rnn_r=0.04" "rnn_r=0.05" "rnn_k=5" "rnn_k=10" "rnn_k=15")
 GT="${GRAPH_TYPES[$SLURM_ARRAY_TASK_ID]}"
 
 # $0 points at the staged copy of this script in the compute node's spool
