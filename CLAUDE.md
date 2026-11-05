@@ -20,7 +20,7 @@ and `result_plots/`:
 |---|---|---|
 | `overview` | 1 | Figure 1 (boundary-effect examples, pipeline panels) |
 | `spatial_omics` | 2 + 3 | Visium HD / Stereo-seq: data-driven analysis buffer (section 2) and RNA-diffusion QC (section 3); one shared pipeline |
-| `microns` | 2 (panel) | MICrONS connectome analysis buffer (more code/data in `/home/woody/iwbn/iwbn007h/MICrONS_data/`) |
+| `physically_realized_graphs` | tbd | measured networks truncated by the imaging volume: MICrONS connectome analysis buffer (more code/data in `/home/woody/iwbn/iwbn007h/MICrONS_data/`), Arabidopsis meristem cell-contact networks (Jackson et al. 2019) |
 | `computational_effects` | 4 | MIBI-TOF fits across graph types/measures; edge-truncation root causes |
 | `correction_benchmark` | 5 | sphere benchmark (BOSPERRUS additive/multiplicative/log vs. linear/spline detrending vs. SERN), sanity checks, runtime scaling |
 | `archive` | — | superseded or removed-from-paper code, notebooks and outputs -- local only, gitignored (untracked 2026-10-27) |
@@ -34,7 +34,8 @@ truncated_graphs/
 ├── src/
 │   ├── spatial_omics/          st_precompute.py (buffer + BLADE + diffusion per sample; writes
 │   │                           results/spatial_omics/st_reroll/, gitignored), blade.py, st_samples.csv
-│   ├── microns/                micron_comparison.py (library for the MICrONS notebooks)
+│   ├── physically_realized_graphs/  micron_comparison.py (library for the MICrONS notebooks),
+│   │                           jackson_centroids.py (meristem cell geometry from MorphoGraphX stacks)
 │   ├── computational_effects/  compute_fits.py, plot_metrics.py, plot_entropy*.py (MIBI-TOF fits),
 │   │                           edge_effects.py + border_effects_kNN_del.py (edge truncation)
 │   ├── correction_benchmark/   sphere.py, sern.py, summarize.py, plot_violins.py,
@@ -44,7 +45,7 @@ truncated_graphs/
 ├── notebooks/
 │   ├── overview/               boundary_effects.ipynb (Figure 1 examples), pipeline_figure.ipynb
 │   ├── spatial_omics/          ST_demo.ipynb (sec. 2), ST_paired.ipynb (sec. 3), border_sanity_checks_{demo,paired}.ipynb
-│   ├── microns/                MICRONS_analysis_buffer.ipynb
+│   ├── physically_realized_graphs/  MICRONS_analysis_buffer.ipynb, jackson2019_meristem.ipynb
 │   ├── tutorials/              bosperrus_on_TMA.ipynb
 │   └── archive/                exploratory/ (clustering, spatial domains, ...), pre_reroll/, older
 ├── results/<topic>/            computational_effects/{edge_effects,mibitof_fits}/,
@@ -126,7 +127,8 @@ Note: kNN edges are `(u, v)` tuples; Delaunay and rNN edges are `frozenset({u, v
 - **MIBI-TOF**: Segmentation TIFFs → centroid extraction in `get_mibitof()`. Coordinate dicts at `mibitof_coords/coords.pickle`, provisioned in this checkout; used by `computational_effects/compute_fits.py` and the `overview` notebooks.
 - **Squidpy Visium**: 35 spatial transcriptomics datasets fetched via `sq.datasets.visium()` in `get_squidpy_visium_datasets()`.
 - **SNAP**: Geolocated check-in network (Brightkite); used for urban/social network comparison. Expected at `SNAP_data/` (gitignored via `.gitignore`'s `*data*` pattern — populate locally).
-- **MICrONS / Reimann connectome**: `data/reimann_data/microns_mm3_connectome.h5`, read by the `microns` and `overview` notebooks via `src/microns/micron_comparison.py`.
+- **MICrONS / Reimann connectome**: `data/reimann_data/microns_mm3_connectome.h5`, read by the `physically_realized_graphs` and `overview` notebooks via `src/physically_realized_graphs/micron_comparison.py`.
+- **Arabidopsis meristem (Jackson et al. 2019)**: OSF zips `data/jackson2019/{WT,ktn1}_Arabidopsis.zip` (https://osf.io/mxgrh/, 4.3 GB); cell geometry via `src/physically_realized_graphs/jackson_centroids.py`.
 - **Visium HD demo data**: the public 10x "v1 - Protocol 2.0" datasets with H&E (11; the IF-stained ovarian cancer is downloaded but excluded), binned outputs at 8/16 µm in `/home/woody/iwbn/iwbn007h/visium_hd_demo_data/` (list: `chemistry_protocol2_list.txt`); samples for the pipeline are listed in `src/spatial_omics/st_samples.csv`.
 - **Blue Brain Project connectome**: expected at `reimann_data/connectome_BBP.h5`, read by the exploratory `edge_effect_in_BBP.ipynb`.
 

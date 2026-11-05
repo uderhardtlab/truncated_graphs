@@ -5,7 +5,7 @@ lab's "outer synapse fraction" heuristic for identifying which neurons/spatial
 bins in the MICrONS mm^3 connectome are affected by the edge effect (missing
 synapses near the reconstructed volume's boundary).
 
-A library of functions driven by notebooks/microns/MICRONS_analysis_buffer.ipynb,
+A library of functions driven by notebooks/physically_realized_graphs/MICRONS_analysis_buffer.ipynb,
 which owns every path/threshold/style setting; nothing here has a default.
 """
 import alphashape
