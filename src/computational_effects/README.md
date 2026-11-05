@@ -6,6 +6,8 @@ How computational boundary effects depend on graph construction and centrality m
   SLURM: `jobs/computational_effects_compute_fits.sbatch`); plotted by `plot_metrics.py` (figure 3), `plot_entropy*.py`.
 - `example_scores.py` → `results/computational_effects/mibitof_fits/figure3_examples.csv` (per-cell scores for the
   example maps on top of figure 3).
+- `imc_centrality.py` → `results/computational_effects/mibitof_fits/imc_centrality.csv` (per-cell degree/clustering/
+  closeness on squidpy's IMC demo FOV, raw and corrected; bottom row of figure 3; input `data/anndata/imc.h5ad`).
 - `edge_effects.py` (+ `border_effects_kNN_del.py`) → `results|result_plots/computational_effects/edge_effects/`
   (root causes: 𝒢(V′) ≠ 𝒢(V)|V′).
 

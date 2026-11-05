@@ -13,6 +13,14 @@ image and graph type chosen in example_scores.py. Colours are clipped to the
 image's 2nd-98th percentile; the colour bar has no numbers, since only the
 spatial pattern matters.
 
+Bottom row: the downstream consequence on squidpy's IMC demo FOV (data from
+imc_centrality.py, squidpy's default kNN k=6 graph). Under degree, clustering
+and closeness: per-cell-type mean as % deviation from the FOV mean, raw (open)
+vs. BOSPERRUS-corrected (filled) -- relative to the FOV mean so that the
+correction's overall level shift doesn't hide the differences between cell
+types. Under betweenness (not offered by squidpy): each cell type's median
+distance to the border; rows are sorted by it, border-near on top.
+
 Each (measure, family) cell is a mini "jointplot":
   - main panel: every non-Constant dataset's fitted curve. y is anchored to
     observed_effect_strength (not min-max normalized), so y(0) at the
@@ -65,6 +73,7 @@ from bosperrus.fit import PiecewiseLinearFit, ExponentialSaturationFit, Michaeli
 ROOT = Path(__file__).resolve().parent.parent.parent
 
 MEASURES = ["degree", "clustering", "closeness", "betweenness"]
+IMC_MEASURES = ["degree", "clustering", "closeness"]  # what squidpy's centrality_scores offers
 
 REPRESENTATIVE = {"Delaunay": "delaunay", "kNN (k=10)": "knn_k=10", "rNN (mean deg. 10)": "rnn_k=10"}
 FAMILIES = list(REPRESENTATIVE.keys())
@@ -228,12 +237,53 @@ def plot_example(ax_map, ax_cbar, ex):
     ax_cbar.text(0.5, -0.02, "low", transform=ax_cbar.transAxes, ha="center", va="top", fontsize=5.5)
 
 
-def plot_metrics(data, examples, fit_palette):
+def relative_means(imc, measure, kind):
+    """Per-cell-type mean as % deviation from the FOV mean."""
+    col = f"{measure}_{kind}"
+    return (imc.groupby("cell_type")[col].mean() / imc[col].mean() - 1) * 100
+
+
+def plot_imc(fig, gs, row, imc):
+    order = imc.groupby("cell_type")["d"].median().sort_values()  # border-near on top
+    y = np.arange(len(order))[::-1]
+    colors = imc.groupby("cell_type")["color"].first().loc[order.index].tolist()
+    counts = imc["cell_type"].value_counts().loc[order.index]
+
+    axes = []
+    for ci, measure in enumerate(MEASURES):
+        ax = fig.add_subplot(gs[row, ci * 2], sharey=axes[0] if axes else None)
+        axes.append(ax)
+        ax.spines[["top", "right"]].set_visible(False)
+        ax.tick_params(labelsize=6)
+        if measure not in IMC_MEASURES:
+            ax.barh(y, order.values / imc["d"].max(), color=colors, height=0.7)
+            ax.set_xlabel("median distance to border / d_max", fontsize=6.5)
+            ax.set_title("position", fontsize=8, pad=3)
+            ax.tick_params(labelleft=False)
+            ax.legend(*axes[0].get_legend_handles_labels(), frameon=False, fontsize=6, loc="center left", bbox_to_anchor=(1.0, 0.5),
+                      handletextpad=0.1)
+            continue
+        raw, corrected = relative_means(imc, measure, "raw").loc[order.index], relative_means(imc, measure, "corrected").loc[order.index]
+        ax.axvline(0, color="#cccccc", lw=0.6, zorder=0)
+        ax.hlines(y, raw, corrected, color="#bbbbbb", lw=1, zorder=1)
+        ax.scatter(raw, y, facecolor="white", edgecolor=colors, s=14, lw=1, zorder=2, label="raw")
+        ax.scatter(corrected, y, color=colors, s=14, zorder=3, label="corrected")
+        ax.set_xlabel(f"{measure} vs. FOV mean (%)", fontsize=6.5)
+        if ci == 0:
+            ax.set_yticks(y, [f"{t} ({n})" for t, n in counts.items()], fontsize=6)
+            ax.set_title("squidpy IMC example (kNN, k=6): per-cell-type mean, raw vs. corrected",
+                         fontsize=8, pad=3, loc="left")
+        else:
+            ax.tick_params(labelleft=False)
+
+
+def plot_metrics(data, examples, imc, fit_palette):
     n_rows, n_cols = len(FAMILIES), len(MEASURES)
-    fig = plt.figure(figsize=(7.5, 6.6))
-    # row 0: example maps; then a gap row; then (top margin, main) per family
-    gs = GridSpec(n_rows * 2 + 2, n_cols * 2, figure=fig,
-                  height_ratios=[3.2, 0.35] + [0.6, 2.6] * n_rows, width_ratios=[3.2, 0.7] * n_cols,
+    fig = plt.figure(figsize=(7.5, 8.8))
+    # row 0: example maps; then a gap row; then (top margin, main) per family;
+    # then a gap row and the IMC example
+    gs = GridSpec(n_rows * 2 + 4, n_cols * 2, figure=fig,
+                  height_ratios=[3.2, 0.35] + [0.6, 2.6] * n_rows + [1.7, 3.4], width_ratios=[3.2, 0.7] * n_cols,
                   hspace=0.06, wspace=0.08)
 
     for ci, measure in enumerate(MEASURES):
@@ -260,6 +310,7 @@ def plot_metrics(data, examples, fit_palette):
             else:
                 plt.setp(ax_main.get_xticklabels(), visible=False)
 
+    plot_imc(fig, gs, n_rows * 2 + 3, imc)
     return fig
 
 
@@ -269,7 +320,8 @@ def main():
 
     data = load_data()
     examples = pd.read_csv(ROOT / "results" / "computational_effects" / "mibitof_fits" / "figure3_examples.csv")
-    fig = plot_metrics(data, examples, fit_palette)
+    imc = pd.read_csv(ROOT / "results" / "computational_effects" / "mibitof_fits" / "imc_centrality.csv")
+    fig = plot_metrics(data, examples, imc, fit_palette)
 
     out = ROOT / "result_plots" / "computational_effects" / "mibitof_fits" / "figure3"
     fig.savefig(str(out) + ".svg", format="svg", bbox_inches="tight", dpi=600)  # dpi of the rasterized curve layers
