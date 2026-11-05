@@ -17,7 +17,7 @@ second-difference penalty, lambda chosen by GCV) ("spline") of S vs. d.
 
 Graphs are recomputed on the crop, as when a proximity graph is built on an imaged region.
 Delaunay on the crop uses a stereographic projection from the cap's antipode, i.e. the spherical
-Delaunay without the hull facets that triangulate the empty hole (see plot_delaunay_cap.py).
+Delaunay without the hull facets that triangulate the empty hole.
 "delaunay_pruned" additionally drops edges longer than the upper boxplot whisker of the edge
 lengths, as Giotto's createSpatialNetwork(maximum_distance_delaunay="auto") does.
 All methods are correlated on the same nodes (finite in every method).  All graph

@@ -39,7 +39,7 @@ truncated_graphs/
 │   ├── computational_effects/  compute_fits.py, plot_metrics.py, plot_entropy*.py (MIBI-TOF fits),
 │   │                           edge_effects.py + border_effects_kNN_del.py (edge truncation)
 │   ├── correction_benchmark/   sphere.py, sern.py, summarize.py, plot_violins.py,
-│   │                           sanity_multiplicative.py, plot_delaunay_cap.py, runtime_scaling.py
+│   │                           sanity_multiplicative.py, runtime_scaling.py
 │   └── archive/                old Visium HD pipeline (visium_hd.py, border_fit.py, figure4/, ...),
 │                               old exploratory scripts, older iterations
 ├── notebooks/
