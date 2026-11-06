@@ -7,8 +7,6 @@ from scipy.spatial.distance import pdist
 from joblib import Parallel, delayed
 from tqdm import tqdm
 
-import sys
-sys.path.append("../../bosperrus-package/")
 from bosperrus import *
 
 

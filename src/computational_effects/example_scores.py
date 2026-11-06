@@ -1,6 +1,6 @@
 """
 Figure 3 column examples: per-cell scores of one MIBI-TOF image per measure,
-for the maps drawn above each measure column of plot_metrics.py.
+for the maps drawn above each measure column of figure_plotting/computational_effects/mibitof_fits.ipynb.
 
 The graph type per measure follows the text (NARRATIVE): the usual drop at the
 border (degree, rNN), the denser one-sided neighbourhoods at a fixed out-degree

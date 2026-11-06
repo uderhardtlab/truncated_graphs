@@ -7,23 +7,23 @@
 .pixi/*
 !.pixi/config.toml
 
-# slurm job logs
+# slurm job logs (the job scripts themselves are tracked)
 jobs/logs/*
 !jobs/logs/.gitkeep
-jobs
 
-# large/intermediate results (moved from results/exploratory in the 2026-10-26 restructure)
+# large/intermediate results
 results/spatial_omics/st_reroll
 # papers kept for reference only (not redistributable)
 literature/
-# notebook/script caches
-notebooks/cache/
+# caches
+cache/
 src/cache/
 
-# superseded / exploratory material: kept locally, not in the repo (untracked 2026-10-27)
+# superseded / exploratory material: kept locally, not in the repo
 src/archive/
-notebooks/archive/
+figure_plotting/archive/
 results/archive/
-result_plots/archive/
 jobs/archive/
-result_plots/spatial_omics/ST_profiles_tissue_edge.pdf
+
+# local assistant instructions
+CLAUDE.md

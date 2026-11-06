@@ -1,0 +1,20 @@
+{
+ "layer_agreement": {
+  "layer_from_start": 0.1358220810166799,
+  "layer_from_end": 0.7720413026211279
+ },
+ "spearman_with_published": {
+  "log_bc": 0.9999996873145496,
+  "rwc": 0.9999999338550009,
+  "area": 0.994886802108355,
+  "volume": 0.9965968003116659,
+  "anisotropy": 0.9962667702377089
+ },
+ "division_distance": {
+  "dividing_median_um": 28.775106151228627,
+  "n_dividing": 94,
+  "non_dividing_median_um": 30.831601326795873,
+  "n_non_dividing": 1165,
+  "mannwhitney_p": 0.03589773728392781
+ }
+}

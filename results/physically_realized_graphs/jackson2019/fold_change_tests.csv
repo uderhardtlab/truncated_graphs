@@ -1,0 +1,25 @@
+scenario,group,prop,welch_p
+"central cells, raw (paper)",dividing (T0),area,5.980912150202453e-16
+"central cells, raw (paper)",dividing (T0),volume,8.507220193426498e-17
+"central cells, raw (paper)",dividing (T0),anisotropy,2.5763113738529565e-06
+"central cells, raw (paper)",dividing (T0),degree,1.317073691829351e-07
+"central cells, raw (paper)",dividing (T0),bc,0.002420571120410195
+"central cells, raw (paper)",dividing (T0),rwc,9.653257679104497e-08
+"central cells, raw (paper)",divided (T1),area,8.431090945515742e-05
+"central cells, raw (paper)",divided (T1),volume,1.4873286766288296e-06
+"central cells, raw (paper)",divided (T1),anisotropy,0.20404460477715744
+"central cells, raw (paper)",divided (T1),degree,0.9650142434416
+"central cells, raw (paper)",divided (T1),bc,0.2303958833236176
+"central cells, raw (paper)",divided (T1),rwc,0.14080610723238415
+"central cells, BOSPERRUS",dividing (T0),area,5.980912150202453e-16
+"central cells, BOSPERRUS",dividing (T0),volume,8.507220193426498e-17
+"central cells, BOSPERRUS",dividing (T0),anisotropy,2.5763113738529565e-06
+"central cells, BOSPERRUS",dividing (T0),degree,4.996527290129637e-07
+"central cells, BOSPERRUS",dividing (T0),bc,0.013386607188593032
+"central cells, BOSPERRUS",dividing (T0),rwc,5.148083647244971e-06
+"central cells, BOSPERRUS",divided (T1),area,8.431090945515742e-05
+"central cells, BOSPERRUS",divided (T1),volume,1.4873286766288296e-06
+"central cells, BOSPERRUS",divided (T1),anisotropy,0.20404460477715744
+"central cells, BOSPERRUS",divided (T1),degree,0.8807650301310923
+"central cells, BOSPERRUS",divided (T1),bc,0.02140135769135986
+"central cells, BOSPERRUS",divided (T1),rwc,0.16162874624636034

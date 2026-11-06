@@ -13,8 +13,6 @@ import squidpy as sq
 import tifffile as tf
 from tqdm import tqdm
 
-import sys
-sys.path.append("/data/bionets/je30bery/bosperrus-package")
 from bosperrus import delaunay_edges, knn_edges, rnn_edges
 
 

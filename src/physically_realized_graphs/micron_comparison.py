@@ -5,15 +5,12 @@ lab's "outer synapse fraction" heuristic for identifying which neurons/spatial
 bins in the MICrONS mm^3 connectome are affected by the edge effect (missing
 synapses near the reconstructed volume's boundary).
 
-A library of functions driven by notebooks/physically_realized_graphs/MICRONS_analysis_buffer.ipynb,
-which owns every path/threshold/style setting; nothing here has a default.
+Library for microns_buffer.py, which owns every path and threshold; nothing here has a default.
 """
 import alphashape
 import conntility
 import numpy as np
 import pandas as pd
-from matplotlib import pyplot as plt
-from matplotlib.lines import Line2D
 
 import bosperrus
 
@@ -171,87 +168,3 @@ def prepare_microns_data(fn_mat, nbins, alpha, reimann_thresh):
         "x_centers_um": (x_edges_um[:-1] + x_edges_um[1:]) / 2,
         "z_centers_um": (z_edges_um[:-1] + z_edges_um[1:]) / 2,
     }
-
-
-# ── plotting ──────────────────────────────────────────────────────────────────
-def plot_fits_panel(ax, flow, alpha_distances, scores, measure,
-                     fit_color, legend_label_fn, ylabel, title):
-    """Quantile bands + per-distance mean (via `bosperrus.plot_fit`) of `measure`'s centrality score
-    vs. distance to the alpha-shape boundary, overlaid with the fitted
-    piecewise-linear BOSPERRUS curve. `legend_label_fn(measure, b, m, c)`
-    builds the legend text (e.g. to show the fitted elbow value).
-    """
-    fit = flow.best_fits[measure]
-    b = fit.params["piecewise_linear_b"]
-    m = fit.params["piecewise_linear_m"]
-    c = fit.params["piecewise_linear_c"]
-
-    # plot_fit's predict_fn is evaluated on whatever d_grid it's given -- here
-    # that's in um (matching the displayed axis), so convert back to the nm
-    # scale the fit itself was trained on before calling fit.predict.
-    bosperrus.plot_fit(
-        ax, alpha_distances / 1e3, scores[measure],
-        lambda d_um: fit.predict(np.asarray(d_um) * 1e3),
-        line_kwargs={"color": fit_color, "linewidth": 2, "label": legend_label_fn(measure, b, m, c)},
-    )
-    ax.axvline(b / 1e3, color=fit_color, lw=1.2, ls="--", alpha=0.85)
-
-    ax.set_yscale("log")
-    ax.set_xlabel("Distance to boundary (µm)")
-    ax.set_ylabel(ylabel)
-    if title:
-        ax.set_title(title)
-    ax.legend(fontsize=8, markerscale=6, frameon=False)
-    ax.spines[["top", "right"]].set_visible(False)
-
-
-def _plot_poly_boundary(ax, geom, **kwargs):
-    polys = list(geom.geoms) if hasattr(geom, "geoms") else [geom]
-    for p in polys:
-        if hasattr(p, "exterior"):
-            coords = np.array(p.exterior.coords)
-            ax.plot(coords[:, 0] / 1e3, coords[:, 1] / 1e3, **kwargs)
-
-
-def plot_boundary_heatmap_panel(ax, data, reimann_thresh, cmap,
-                                 boundary_label, boundary_color,
-                                 reimann_neuron_label, reimann_neuron_color,
-                                 reimann_bin_label, reimann_bin_color,
-                                 elbow_color, legend_bbox_to_anchor):
-    """Max outer-synapse-fraction heatmap with Reimann contours, the
-    alpha-shape tissue boundary, and the bosperrus elbow boundary overlaid.
-    `data` is the dict returned by prepare_microns_data.
-    """
-    comparison = data["comparison"]
-    I_frac_max, I_frac_mean = comparison["I_frac_max"], comparison["I_frac_mean"]
-
-    cm = plt.get_cmap(cmap).copy()
-    cm.set_bad("0.85")
-    pcm = ax.pcolormesh(data["x_edges_um"], data["z_edges_um"], I_frac_max.values,
-                         cmap=cm, shading="flat", rasterized=True, vmin=0, vmax=1)
-    plt.colorbar(pcm, ax=ax, label="Max outer synapse fraction", shrink=0.75, pad=0.02)
-
-    ax.contour(data["x_centers_um"], data["z_centers_um"], I_frac_mean.values,
-               levels=[reimann_thresh], colors=[reimann_neuron_color], linewidths=1.5, linestyles="-")
-    ax.contour(data["x_centers_um"], data["z_centers_um"], I_frac_max.values,
-               levels=[reimann_thresh], colors=[reimann_bin_color], linewidths=1.5, linestyles="-")
-
-    _plot_poly_boundary(ax, data["alpha_shape"], color=boundary_color, lw=1, ls="-", alpha=0.7)
-    elbow = comparison["elbow"]
-    elbow_poly = data["alpha_shape"].buffer(-elbow)
-    if not elbow_poly.is_empty:
-        _plot_poly_boundary(ax, elbow_poly, color=elbow_color, lw=2)
-
-    legend_handles = [
-        Line2D([0], [0], color=boundary_color, lw=1, ls="-", alpha=0.7, label=boundary_label),
-        Line2D([0], [0], color=reimann_neuron_color, lw=1.5, ls="-", label=reimann_neuron_label),
-        Line2D([0], [0], color=reimann_bin_color, lw=1.5, ls="-", label=reimann_bin_label),
-        Line2D([0], [0], color=elbow_color, lw=2, ls="-", label=f"bosperrus ({elbow / 1e3:.0f} µm)"),
-    ]
-    ax.legend(handles=legend_handles, fontsize=7, frameon=True,
-              loc="upper center", bbox_to_anchor=legend_bbox_to_anchor,
-              ncols=2, borderaxespad=0)
-    ax.set_xlabel("x (µm)")
-    ax.set_ylabel("z (µm)")
-    ax.set_aspect("equal")
-    ax.spines[["top", "right"]].set_visible(False)
