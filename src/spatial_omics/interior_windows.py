@@ -18,8 +18,10 @@ windows is the null of border_criterion.window_p_value.
 Needs the main st_precompute.py run ({sample}_diffusion_8um.npz).
 
 Usage (cwd = truncated_graphs/):
-    pixi run python src/spatial_omics/interior_windows.py [sample ...]   # default: all visium_demo samples; paired samples allowed
-    pixi run python src/spatial_omics/interior_windows.py --resolution 2 [sample ...]   # setup of st_precompute.py --tissue-edge
+    pixi run python src/spatial_omics/interior_windows.py [sample ...]
+        default: all visium_demo samples; paired samples allowed
+    pixi run python src/spatial_omics/interior_windows.py --resolution 2 [sample ...]
+        windows for the setup of st_precompute.py --tissue-edge
 
 Writes results/spatial_omics/st_reroll/interior_windows/{sample}_windows.csv, one row per window.
 """
@@ -29,16 +31,21 @@ import time
 from pathlib import Path
 
 import anndata
+import bosperrus
 import numpy as np
 import pandas as pd
-
-import bosperrus
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from border_criterion import criterion_metrics  # noqa: E402
 from st_precompute import (  # noqa: E402
-    MAX_HOLE_AREA_UM2, MIN_COMPONENT_SPOTS, OUT_DIR, RESOLUTION_UM, SAMPLES, TISSUE_FIT_MAX_DISTANCE_UM,
-    distance_to_tissue_edge, load_raw,
+    MAX_HOLE_AREA_UM2,
+    MIN_COMPONENT_SPOTS,
+    OUT_DIR,
+    RESOLUTION_UM,
+    SAMPLES,
+    TISSUE_FIT_MAX_DISTANCE_UM,
+    distance_to_tissue_edge,
+    load_raw,
     min_component_bins,
 )
 

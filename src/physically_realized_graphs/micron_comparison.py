@@ -8,11 +8,10 @@ synapses near the reconstructed volume's boundary).
 Library for microns_buffer.py, which owns every path and threshold; nothing here has a default.
 """
 import alphashape
+import bosperrus
 import conntility
 import numpy as np
 import pandas as pd
-
-import bosperrus
 
 
 # ── data preparation ──────────────────────────────────────────────────────────
@@ -26,7 +25,7 @@ def bin_reimann(M, nbins):
     (Reimann's border-region heuristic: bin synapse count < 1000, or within 3
     bins of the top/bottom of the z-stack). Mutates M in place (adds edge/vertex
     properties). Returns the compressed per-neuron view C with an added
-    "outer_syn_fraction" vertex property, plus the raw per-bin synapse-count table I.
+    "outer_syn_fraction" vertex property, plus the raw per-bin synapse-count table.
     """
     x_col, z_col = f"x_nm_binned_{nbins}", f"z_nm_binned_{nbins}"
     for col, binned_col in [("x_nm", x_col), ("z_nm", z_col)]:
@@ -34,10 +33,10 @@ def bin_reimann(M, nbins):
         M.add_edge_property(binned_col, np.digitize(M.edges[col], bins=bins))
         M.add_vertex_property(binned_col, np.digitize(M.vertices[col], bins=bins))
 
-    I = M.edges.groupby([x_col, z_col])["id"].count().unstack(x_col)
+    counts = M.edges.groupby([x_col, z_col])["id"].count().unstack(x_col)
 
     edge_idxx = pd.MultiIndex.from_frame(M.edges[[z_col, x_col]])
-    is_outer = I.stack().rename("count").reset_index()
+    is_outer = counts.stack().rename("count").reset_index()
     is_outer["outer"] = (
         (is_outer["count"] < 1000) |
         (is_outer[z_col] <= 3) |
@@ -49,7 +48,7 @@ def bin_reimann(M, nbins):
     C = M.compress({"outer_bin_count": ("syn_in_outer_bin", "sum")})
     outer_per_neuron = np.array(C.default("outer_bin_count").matrix.sum(axis=0))[0]
     C.add_vertex_property("outer_syn_fraction", outer_per_neuron / C.vertices["indegree"].values)
-    return C, I
+    return C, counts
 
 
 def compute_alpha_shape_distances(M, alpha):
@@ -93,6 +92,7 @@ def compute_reimann_comparison(M, C, flow, alpha_distances, reimann_thresh, nbin
     df["bosperrus_affected"] = df["bosperrus_distance"] < elbow
 
     def jaccard(a, b):
+        """|a & b| / |a | b| of two boolean Series."""
         return (a & b).sum() / (a | b).sum()
 
     j_neuron = jaccard(df["bosperrus_affected"], df["reimann_affected"])
@@ -106,7 +106,7 @@ def compute_reimann_comparison(M, C, flow, alpha_distances, reimann_thresh, nbin
 
     bin_max_frac = pd.Series(
         [I_frac_max.at[zb, xb] if (zb in I_frac_max.index and xb in I_frac_max.columns) else np.nan
-         for zb, xb in zip(z_bins, x_bins)],
+         for zb, xb in zip(z_bins, x_bins, strict=True)],
         index=df.index,
     )
     bin_reimann_affected = bin_max_frac > reimann_thresh

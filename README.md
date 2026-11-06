@@ -40,6 +40,8 @@ sbatch --clusters=tinyfat jobs/figure_plotting.sbatch figure_plotting/correction
 
 Heavy computations run on the cluster (`jobs/`), not on the login node.
 
+Lint: `pixi exec ruff check src` (settings in `pyproject.toml`).
+
 ## Data
 
 Inputs live in `data/` (gitignored, populate per checkout); `mibitof_coords/coords.pickle` is tracked.

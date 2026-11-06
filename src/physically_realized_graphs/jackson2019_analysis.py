@@ -35,12 +35,11 @@ import networkx as nx
 import numpy as np
 import pandas as pd
 import statsmodels.formula.api as smf
+from bosperrus import Flow
+from bosperrus.fit import PiecewiseLinearFit
 from scipy.spatial import ConvexHull
 from scipy.stats import mannwhitneyu, spearmanr, ttest_ind
 from shapely.geometry import Point, Polygon
-
-from bosperrus import Flow
-from bosperrus.fit import PiecewiseLinearFit
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 DATA_DIR = ROOT / "data" / "jackson2019"
@@ -48,12 +47,15 @@ OUT = ROOT / "results" / "physically_realized_graphs" / "jackson2019"
 CENTROIDS = OUT / "centroids.csv"
 GENOTYPE, ZIP = "WT", DATA_DIR / "WT_Arabidopsis.zip"
 MIN_LAYER_CELLS = 30
+PUBLISHED_COLS = ["Division", "Volume", "Layer", "Log_Betweenness_Centrality", "Random_Walk_Centrality", "Area",
+                  "Anisotropy"]
 STRUCTURAL = ["degree", "log_bc", "rwc"]  # network properties; cell geometry is not a graph-construction artefact
 FC_PROPS = ["area", "volume", "anisotropy", "degree", "bc", "rwc"]
 
 
 # ── data ──────────────────────────────────────────────────────────────────────
 def read_csv_from_zip(z, name):
+    """A CSV member of an open zip file as a DataFrame."""
     return pd.read_csv(BytesIO(z.read(name)), skipinitialspace=True)
 
 
@@ -68,15 +70,17 @@ def load_samples(zip_path, genotype):
             edges = read_csv_from_zip(z, net)
             edges = edges[edges.iloc[:, 2] >= 0.01]  # the paper omits walls < 0.01 um^2
             G = nx.Graph()
-            G.add_edges_from(zip(edges.iloc[:, 0], edges.iloc[:, 1]))
+            G.add_edges_from(zip(edges.iloc[:, 0], edges.iloc[:, 1], strict=True))
             topo_name = [n for n in names if n.startswith(f"{net.rsplit('/', 1)[0]}/") and n.endswith("_topology.csv")]
             topo = read_csv_from_zip(z, topo_name[0]).set_index("Label") if topo_name else None
-            pos = centroids[(centroids.genotype == genotype) & (centroids.rep == rep) & (centroids.time == time)].set_index("label")
+            this = (centroids.genotype == genotype) & (centroids.rep == rep) & (centroids.time == time)
+            pos = centroids[this].set_index("label")
             samples[(rep, time)] = dict(G=G, topo=topo, pos=pos.loc[list(G.nodes)])
     return samples
 
 
 def load_parents(zip_path):
+    """T0 -> T1 lineage table per replicate (column order not yet oriented)."""
     out = {}
     with zipfile.ZipFile(zip_path) as z:
         for name in z.namelist():
@@ -94,6 +98,8 @@ def lateral_distance(xy):
 
 
 def cell_table(G, pos, topo=None):
+    """Per cell: geometry, distance d to the field-of-view edge, log10 betweenness, degree, RWC and the published
+    values where they exist (`central` marks the cells the paper evaluated)."""
     nodes = list(G.nodes)
     df = pd.DataFrame(index=pd.Index(nodes, name="label"))
     cols = ["x", "y", "z", "area", "volume", "anisotropy", "layer_from_start", "layer_from_end"]
@@ -108,12 +114,13 @@ def cell_table(G, pos, topo=None):
     if topo is not None:
         common = df.index.intersection(topo.index)
         df.loc[common, "central"] = True
-        for col in ["Division", "Volume", "Layer", "Log_Betweenness_Centrality", "Random_Walk_Centrality", "Area", "Anisotropy"]:
+        for col in PUBLISHED_COLS:
             df.loc[common, col] = topo.loc[common, col]
     return df
 
 
 def layer_group(layer):
+    """Layer with L4 and deeper pooled into 4."""
     return np.minimum(np.asarray(layer, dtype=float), 4)  # L4 and deeper column counts pooled
 
 
@@ -134,24 +141,27 @@ def correct_by_layer(df, cols, d_col="d"):
 
 
 def pl_knot(df, col):
+    """Knot (um) of a piecewise-linear fit of `col` against d."""
     fit = PiecewiseLinearFit(df[col].reset_index(drop=True), df["d"].reset_index(drop=True))
     fit.fit()
     return fit.params["piecewise_linear_b"]
 
 
 def logit(formula, data, score):
+    """Logistic regression; coefficient, 95 % CI and p of `score`."""
     r = smf.logit(formula, data).fit(disp=0)
     lo, hi = r.conf_int().loc[score]
     return dict(coef=r.params[score], ci_low=lo, ci_high=hi, p=r.pvalues[score])
 
 
 def pooled(tables, mask=lambda t: slice(None)):
-    out = pd.concat([t.loc[mask(t)].assign(rep=k[0], time=k[1]) for k, t in tables.items()])
-    return out
+    """All meristems' cell tables (rows selected by `mask`) stacked, with rep and time columns."""
+    return pd.concat([t.loc[mask(t)].assign(rep=k[0], time=k[1]) for k, t in tables.items()])
 
 
 # ── analysis ──────────────────────────────────────────────────────────────────
 def main():
+    """Run all analyses and write the tables to OUT."""
     OUT.mkdir(parents=True, exist_ok=True)
     samples = load_samples(ZIP, GENOTYPE)
     tables = {key: cell_table(s["G"], s["pos"], s["topo"]) for key, s in samples.items()}
@@ -167,8 +177,9 @@ def main():
     summary["layer_agreement"] = match
     summary["spearman_with_published"] = {
         name: float(spearmanr(check[theirs], check[mine])[0])
-        for name, theirs, mine in [("log_bc", "Log_Betweenness_Centrality", "log_bc"), ("rwc", "Random_Walk_Centrality", "rwc"),
-                                   ("area", "Area", "area"), ("volume", "Volume", "volume"), ("anisotropy", "Anisotropy", "anisotropy")]}
+        for name, theirs, mine in [("log_bc", "Log_Betweenness_Centrality", "log_bc"),
+                                   ("rwc", "Random_Walk_Centrality", "rwc"), ("area", "Area", "area"),
+                                   ("volume", "Volume", "volume"), ("anisotropy", "Anisotropy", "anisotropy")]}
 
     # per-layer correction of degree, log10 BC and RWC
     fit_rows = []
@@ -195,8 +206,9 @@ def main():
             inside = set(cells.index[cells.d > knot])
             buffers[(key, col)] = inside
             t.loc[list(inside), f"beyond_knot_{col}"] = True
-            knot_rows.append(dict(rep=key[0], time=key[1], measure=col, knot_um=knot, cells=len(cells), kept=len(inside),
-                                  paper_central=len(central), paper_edge_um=cells.loc[list(central), "d"].quantile(0.05),
+            knot_rows.append(dict(rep=key[0], time=key[1], measure=col, knot_um=knot, cells=len(cells),
+                                  kept=len(inside), paper_central=len(central),
+                                  paper_edge_um=cells.loc[list(central), "d"].quantile(0.05),
                                   jaccard=len(inside & central) / len(inside | central),
                                   paper_cells_inside=len(inside & central) / len(central)))
     knots = pd.DataFrame(knot_rows)
@@ -241,7 +253,8 @@ def main():
             sub["crop_corr"] = correct_by_layer(sub, ["crop_raw"], d_col="d_crop")[0]["crop_raw"]
             c = sub[sub.central]
             crop_rows.append(dict(rep=key[0], time=key[1], delta=delta, central_kept=len(c),
-                                  rho_raw=spearmanr(c.log_bc, c.crop_raw)[0], rho_corr=spearmanr(c.log_bc, c.crop_corr)[0]))
+                                  rho_raw=spearmanr(c.log_bc, c.crop_raw)[0],
+                                  rho_corr=spearmanr(c.log_bc, c.crop_corr)[0]))
             cropped[(key, delta)] = sub
     pd.DataFrame(crop_rows).to_csv(OUT / "crops.csv", index=False)
     rows = []
@@ -249,7 +262,8 @@ def main():
         sub = pd.concat([s.assign(rep=k[0], time=k[1]) for (k, d), s in cropped.items() if d == delta])
         sub = sub[sub.central].copy()
         sub["Division"] = sub.Division.astype(int)
-        for score, label in [("log_bc", "full network (reference)"), ("crop_raw", "cropped, raw"), ("crop_corr", "cropped, BOSPERRUS")]:
+        for score, label in [("log_bc", "full network (reference)"), ("crop_raw", "cropped, raw"),
+                             ("crop_corr", "cropped, BOSPERRUS")]:
             rows.append(dict(delta=delta, score=label, n=len(sub),
                              **logit(f"Division ~ {score} + np.log(Volume) + C(rep) + C(time)", sub, score)))
     pd.DataFrame(rows).to_csv(OUT / "crop_association.csv", index=False)
@@ -276,23 +290,27 @@ def main():
                 s = sub[m]
                 depth_rows.append(dict(rep=key[0], time=key[1], layer=layer, subset=subset, n=int(m.sum()),
                                        degree_lost=(s.degree - s.degree_noL4).mean(),
-                                       rho_bc=spearmanr(s.log_bc, s.log_bc_noL4)[0], rho_rwc=spearmanr(s.rwc, s.rwc_noL4)[0]))
+                                       rho_bc=spearmanr(s.log_bc, s.log_bc_noL4)[0],
+                                       rho_rwc=spearmanr(s.rwc, s.rwc_noL4)[0]))
     pd.DataFrame(depth_rows).to_csv(OUT / "depth.csv", index=False)
     sub = pd.concat([s.assign(rep=k[0], time=k[1]) for k, s in depth_scores.items()])
     sub = sub[sub.central].copy()
     sub["Division"] = sub.Division.astype(int)
-    pd.DataFrame([dict(network=label, n=len(sub), **logit(f"Division ~ {score} + np.log(Volume) + C(rep) + C(time)", sub, score))
-                  for score, label in [("log_bc", "full network (with L4)"), ("log_bc_noL4", "without L4")]]
-                 ).to_csv(OUT / "depth_association.csv", index=False)
+    rows = [dict(network=label, n=len(sub),
+                 **logit(f"Division ~ {score} + np.log(Volume) + C(rep) + C(time)", sub, score))
+            for score, label in [("log_bc", "full network (with L4)"), ("log_bc_noL4", "without L4")]]
+    pd.DataFrame(rows).to_csv(OUT / "depth_association.csv", index=False)
 
     # Fig. 3A: fold changes of non-dividing / dividing (T0) / divided (T1) central cells, raw vs. corrected
     parents = {}
     for rep, lineage in load_parents(ZIP).items():
         t0, t1 = set(tables[(rep, "T0")].index), set(tables[(rep, "T1")].index)
         a_in_t1 = np.mean([v in t1 for v in lineage.a]) > np.mean([v in t0 for v in lineage.a])  # orient the columns
-        parents[rep] = pd.DataFrame({"child": lineage.a if a_in_t1 else lineage.b, "parent": lineage.b if a_in_t1 else lineage.a})
+        child, parent = (lineage.a, lineage.b) if a_in_t1 else (lineage.b, lineage.a)
+        parents[rep] = pd.DataFrame({"child": child, "parent": parent})
 
     def scenario_cells(key, scenario):
+        """Central L1-L3 cells of one meristem, network properties raw or corrected, plus BC = 10^log_bc."""
         t = tables[key][tables[key].layer.between(1, 3) & tables[key].central].copy()
         if scenario == "central cells, BOSPERRUS":
             for col in STRUCTURAL:

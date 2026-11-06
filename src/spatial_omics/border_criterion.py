@@ -53,7 +53,7 @@ def load_window_null(window_dir, samples, suffix=""):
               if f.exists() and f.stat().st_size > 1]
     w = pd.concat(frames)
     eff, half = w["effect_strength"].to_numpy(float), w["half_life_um"].to_numpy(float)
-    count = np.array([_n_as_extreme(e, h, eff, half) - 1 for e, h in zip(eff, half)])  # -1: itself
+    count = np.array([_n_as_extreme(e, h, eff, half) - 1 for e, h in zip(eff, half, strict=True)])  # -1: itself
     return {"effect_strength": eff, "half_life_um": half, "count": count}
 
 
@@ -79,5 +79,6 @@ def false_positive_rate(null, windows=None):
         p = np.array([(1 + int((np.delete(count, i) <= c).sum())) / len(count) for i, c in enumerate(count)])
         p[~np.isfinite(count)] = np.nan
     else:
-        p = np.array([window_p_value(e, h, null) for e, h in zip(windows["effect_strength"], windows["half_life_um"])])
+        p = np.array([window_p_value(e, h, null)
+                      for e, h in zip(windows["effect_strength"], windows["half_life_um"], strict=True)])
     return float(np.mean(p <= ALPHA))

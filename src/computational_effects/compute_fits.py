@@ -12,20 +12,16 @@ Run:
 """
 import os
 import pickle
-import sys
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
+from bosperrus import Flow
+from bosperrus.distances import distance_to_convex_hull
 from scipy.spatial import cKDTree
 from tqdm import tqdm
 
 ROOT = Path(__file__).resolve().parent.parent.parent
-sys.path.insert(0, str(ROOT / "src"))
-
-from bosperrus import Flow
-from bosperrus.distances import distance_to_convex_hull
 
 MEASURES    = ["degree", "pagerank", "betweenness", "closeness", "clustering"]
 GRAPH_TYPES = [
@@ -63,6 +59,7 @@ def normalise_coords(coordinates):
 
 
 def load_datasets(coords_pickle=COORDS_PICKLE):
+    """MIBI-TOF cell centroids per FOV from the coordinate pickle (squidpy Visium samples and one FOV excluded)."""
     with open(coords_pickle, "rb") as f:
         datasets = pickle.load(f)
     datasets.pop("glioma_mibitof:CHOP_907_R1C6_whole_cell.tiff", None)
@@ -76,6 +73,7 @@ def load_datasets(coords_pickle=COORDS_PICKLE):
 
 
 def fit_dataset(dataset, coordinates, graph_type):
+    """Border-effect fits (all MEASURES) of one FOV for one graph type: Flow.fit_quality plus graph size."""
     coords = normalise_coords(coordinates)
     graph_kwargs = _graph_kwargs(graph_type, coords)
     try:
@@ -101,6 +99,7 @@ def fit_dataset(dataset, coordinates, graph_type):
 
 
 def compute_fits(datasets, graph_type):
+    """Fits of all FOVs for one graph type, in parallel; cached as <graph_type>_graph_level_fits.csv."""
     out_csv = RESULTS_DIR / f"{graph_type}_graph_level_fits.csv"
     if out_csv.exists():
         return pd.read_csv(out_csv)
@@ -120,6 +119,7 @@ def compute_fits(datasets, graph_type):
 
 
 def main(graph_types=GRAPH_TYPES, coords_pickle=COORDS_PICKLE):
+    """Fits for every graph type in graph_types; returns them concatenated."""
     datasets = load_datasets(coords_pickle)
 
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)

@@ -74,23 +74,30 @@ def column_layers(vol):
 
 
 def per_label_mode(vol, values, labels):
+    """Most frequent value (0-15) of `values` over the voxels of each label."""
     pairs = vol.astype(np.int64) * 16 + np.minimum(values, 15)
     counts = np.bincount(pairs[vol > 0].ravel(), minlength=(int(vol.max()) + 1) * 16).reshape(-1, 16)
     return counts[labels].argmax(axis=1)
 
 
 def cell_geometry(vol, voxel, labels):
+    """Per label: surface area (marching cubes, um^2) and anisotropy (largest / summed covariance eigenvalues)."""
     rows, objects = [], ndimage.find_objects(vol)
     for lab in labels:
         mask = np.pad(vol[objects[lab - 1]] == lab, 1)
         verts, faces, _, _ = marching_cubes(mask.astype(np.uint8), 0.5, spacing=tuple(voxel[::-1]))
         zz, yy, xx = np.nonzero(mask)
-        ev = np.linalg.eigvalsh(np.cov(np.column_stack([xx, yy, zz]) * voxel, rowvar=False)) if len(zz) > 3 else np.ones(3)
+        if len(zz) > 3:
+            ev = np.linalg.eigvalsh(np.cov(np.column_stack([xx, yy, zz]) * voxel, rowvar=False))
+        else:
+            ev = np.ones(3)
         rows.append((mesh_surface_area(verts, faces), ev.max() / ev.sum()))
     return np.array(rows)
 
 
 def stack_centroids(vol, voxel):
+    """One row per cell of a segmented stack: centroid (um), volume, area, anisotropy and column layer counted from
+    either end of the stack."""
     labels = np.unique(vol)
     labels = labels[labels > 0]
     com = np.array(ndimage.center_of_mass(np.ones_like(vol, dtype=np.uint8), vol, labels))
@@ -104,6 +111,7 @@ def stack_centroids(vol, voxel):
 
 
 def main():
+    """Cell geometry of every stack in the OSF zips -> OUT_CSV."""
     OUT_CSV.parent.mkdir(parents=True, exist_ok=True)
     frames = []
     for zpath in sorted(DATA_DIR.glob("*_Arabidopsis.zip")):

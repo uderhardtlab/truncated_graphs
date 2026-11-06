@@ -21,8 +21,6 @@ Run (needs ~40 GB memory; data/reimann_data/microns_mm3_connectome.h5):
 import json
 from pathlib import Path
 
-import pandas as pd
-
 import micron_comparison as mc
 
 ROOT = Path(__file__).resolve().parent.parent.parent
@@ -34,6 +32,7 @@ REIMANN_THRESH = 0.05  # outer-synapse-fraction cutoff for Reimann's "affected" 
 
 
 def main():
+    """Run the MICrONS comparison and write its tables to OUT."""
     data = mc.prepare_microns_data(FN_MAT, nbins=NBINS, alpha=ALPHA_SHAPE, reimann_thresh=REIMANN_THRESH)
     comp = data["comparison"]
     mc.print_comparison_summary(comp)
@@ -54,8 +53,8 @@ def main():
     summary = dict(nbins=NBINS, alpha_shape=ALPHA_SHAPE, reimann_thresh=REIMANN_THRESH,
                    elbow_nm=float(comp["elbow"]), piecewise_linear_fits=fits,
                    x_edges_um=data["x_edges_um"].tolist(), z_edges_um=data["z_edges_um"].tolist(),
-                   **{k: (float(comp[k]) if "jaccard" in k else int(comp[k]))
-                      for k in ["jaccard_neuron", "jaccard_bin", "n_bosperrus", "n_reimann_neuron", "n_reimann_bin", "n_total"]})
+                   jaccard_neuron=float(comp["jaccard_neuron"]), jaccard_bin=float(comp["jaccard_bin"]),
+                   **{k: int(comp[k]) for k in ["n_bosperrus", "n_reimann_neuron", "n_reimann_bin", "n_total"]})
     (OUT / "summary.json").write_text(json.dumps(summary, indent=1))
     print(f"Wrote {OUT}")
 

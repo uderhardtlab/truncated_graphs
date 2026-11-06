@@ -21,7 +21,6 @@ Run:
 """
 import numpy as np
 import pandas as pd
-
 from bosperrus import Flow
 from bosperrus.distances import distance_to_convex_hull
 from compute_fits import RESULTS_DIR, _graph_kwargs, load_datasets, normalise_coords
@@ -38,6 +37,8 @@ OUT_CSV = RESULTS_DIR / "figure3_examples.csv"
 
 
 def pick_example(measure, graph_type):
+    """FOV (>= MIN_CELLS cells, effect of the typical sign) whose effect strength is closest to the EFFECT_QUANTILE
+    of all FOVs' absolute effect strengths."""
     df = pd.read_csv(RESULTS_DIR / f"{graph_type}_graph_level_fits.csv", index_col=0).loc[measure].set_index("dataset")
     effect = df["observed_effect_strength"].where(df["best_fit_type"] != "Constant Fit", 0)
     sign = np.sign(effect.median())
@@ -47,6 +48,7 @@ def pick_example(measure, graph_type):
 
 
 def main():
+    """Per-cell scores of the example FOV of every measure -> OUT_CSV."""
     datasets = load_datasets()
     frames = []
     for measure, gt in NARRATIVE.items():
@@ -59,7 +61,8 @@ def main():
             graph_type=gt.split("_")[0],
             graph_kwargs=_graph_kwargs(gt, coords),
         )
-        frames.append(pd.DataFrame({"dataset": dataset, "node": range(len(coords)), "x": coords[:, 0], "y": coords[:, 1],
+        frames.append(pd.DataFrame({"dataset": dataset, "node": range(len(coords)),
+                                    "x": coords[:, 0], "y": coords[:, 1],
                                     "measure": measure, "graph_type": gt, "score": flow.observations[measure].values}))
         print(f"{measure}: {gt}, {dataset}")
     pd.concat(frames).to_csv(OUT_CSV, index=False)

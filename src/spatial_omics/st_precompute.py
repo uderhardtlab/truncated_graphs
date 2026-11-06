@@ -15,16 +15,16 @@ All cross-technology comparisons run at RESOLUTION_UM = 8 (Visium HD's
 native 8um bins; Stereo-seq bin1 pooled 16x16).
 
 Usage (cwd = truncated_graphs/):
-    pixi run python src/spatial_omics/st_precompute.py <sample>              # 8um: buffer + diffusion
-    pixi run python src/spatial_omics/st_precompute.py <sample> --ablation   # diffusion only, all ABLATION_RESOLUTIONS
-    pixi run python src/spatial_omics/st_precompute.py <sample> --image-mask # border analysis: raw bins inside the image mask,
-                                             # elbow vs. distance to the tissue edge (main figures)
-    pixi run python src/spatial_omics/st_precompute.py <sample> --in-tissue  # same on Space Ranger's in_tissue bins (supplement)
-    pixi run python src/spatial_omics/st_precompute.py <sample> --blade-image-border
-                                             # spots discarded by BLADE (in_tissue) vs. bosperrus (image border), Jaccard
-                                             # (needs --image-mask, --in-tissue and the interior windows)
-    pixi run python src/spatial_omics/st_precompute.py <sample> --tissue-edge --resolution 2
-                                             # elbow only (no BLADE) at any bin size, zero-count bins kept (resolution check)
+    pixi run python src/spatial_omics/st_precompute.py <sample> [mode]
+
+    (no mode)                  8um: buffer + diffusion
+    --ablation                 diffusion only, all ABLATION_RESOLUTIONS
+    --image-mask               border analysis: raw bins inside the image mask, elbow vs. distance to the tissue
+                               edge (main figures)
+    --in-tissue                same on Space Ranger's in_tissue bins (supplement)
+    --blade-image-border       spots discarded by BLADE (in_tissue) vs. bosperrus (image border), Jaccard (needs
+                               --image-mask, --in-tissue and the interior windows)
+    --tissue-edge --resolution R   elbow only (no BLADE) at any bin size, zero-count bins kept (resolution check)
 
 Every elbow fit is rising-only (bosperrus.RisingPiecewiseLinearFit) and uses only bins within
 TISSUE_FIT_MAX_DISTANCE_UM of the border.
@@ -46,11 +46,10 @@ import sys
 import time
 from pathlib import Path
 
+import bosperrus
 import numpy as np
 import pandas as pd
 from scipy import ndimage
-
-import bosperrus
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from blade import peel_sweep  # noqa: E402
@@ -61,7 +60,8 @@ OUT_DIR = TRUNCATED_GRAPHS / "results" / "spatial_omics" / "st_reroll"
 
 RESOLUTION_UM = 8.0
 MIN_COMPONENT_SPOTS = 1000
-MAX_HOLE_AREA_UM2 = 1024.0  # fill enclosed empty holes up to 16 bins at 8um (see identify_analysis_buffer_from_filtered)
+# fill enclosed empty holes up to 16 bins at 8um (see identify_analysis_buffer_from_filtered)
+MAX_HOLE_AREA_UM2 = 1024.0
 # the elbow is fitted only on bins within this distance of the border: ~10x the observed elbows, short
 # enough that a narrow edge dip is not swamped by tissue-scale gradients, and the depth the smallest
 # interior windows (500 um, see interior_windows.py) reach, so edges and windows share one fit range
@@ -215,6 +215,7 @@ def run_buffer(sample, technology, path, adata=None, footprint="pipeline"):
 
 
 def run_diffusion(technology, path, mask_kwargs, resolution, return_data):
+    """bosperrus.quantify_diffusion_from_raw at `resolution` um, logged; with return_data also the per-bin data."""
     _log(f"quantify_diffusion_from_raw({technology}, {resolution}um, mask_kwargs={mask_kwargs})")
     out = bosperrus.quantify_diffusion_from_raw(path, technology, resolution, mask_kwargs=mask_kwargs,
                                                 return_data=return_data)
@@ -238,6 +239,9 @@ def _display_image(image):
 
 
 def run_main(sample):
+    """Main run of one sample: border buffer on the filtered bins and diffusion at RESOLUTION_UM; writes the filtered
+    bins (with their mask position and distance outside the mask), the buffer and diffusion JSONs and the arrays
+    the figure notebooks draw (mask, downscaled image, per-bin counts and distance) to OUT_DIR."""
     row = SAMPLES.loc[sample]
     technology, path, mask_kwargs = row["technology"], row["path"], json.loads(row["mask_kwargs"])
 
@@ -427,8 +431,8 @@ def run_blade_image_border(sample):
     (--image-mask run; nearest component) when that elbow has p <= ALPHA against the interior windows
     (border_criterion). Jaccard index of the two discarded sets.
     Writes {sample}_blade_imageborder.json and {sample}_bins_blade_imageborder.parquet."""
-    from scipy.spatial import cKDTree
     from border_criterion import criterion_metrics, load_window_null, passes, window_p_value
+    from scipy.spatial import cKDTree
     demo = SAMPLES.index[SAMPLES["dataset_type"] == "visium_demo"]
     null = load_window_null(OUT_DIR / "interior_windows", demo)
 
@@ -452,7 +456,8 @@ def run_blade_image_border(sample):
     # in_tissue bins (BLADE buffer from the --in-tissue run)
     it = pd.read_parquet(OUT_DIR / f"{sample}_filtered_bins_intissue.parquet")
     real = it[~it["virtual"] & (it["components"] >= 0)].copy()
-    idx = raw_index.reindex(pd.MultiIndex.from_arrays([real["array_row"], real["array_col"]])).to_numpy().astype(np.int64)
+    real_index = pd.MultiIndex.from_arrays([real["array_row"], real["array_col"]])
+    idx = raw_index.reindex(real_index).to_numpy().astype(np.int64)
     real["inside_image_mask"] = inside[idx]
     real["distance_image_edge_um"] = to_edge[idx]
     _, nearest = cKDTree(img[["array_row", "array_col"]].to_numpy()).query(real[["array_row", "array_col"]].to_numpy())
@@ -479,6 +484,7 @@ def run_blade_image_border(sample):
 
 
 def run_ablation(sample):
+    """Diffusion of one sample at every resolution in ABLATION_RESOLUTIONS (the main resolution only if missing)."""
     row = SAMPLES.loc[sample]
     technology, path, mask_kwargs = row["technology"], row["path"], json.loads(row["mask_kwargs"])
     OUT_DIR.mkdir(parents=True, exist_ok=True)

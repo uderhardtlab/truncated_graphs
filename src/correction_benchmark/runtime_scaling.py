@@ -13,8 +13,10 @@ Peak memory, two measures (the plot uses the larger):
   peak_node_delta_bytes  peak node-wide used memory minus the value at start, sampled every 0.2 s; covers the
                          SERN worker processes and is valid because the node is exclusive
   peak_main_bytes        peak RSS of the main process (ru_maxrss) minus its RSS at start; exact for BOSPERRUS,
-                         which runs in one process, and for runs shorter than the sampling interval A record is written before the computation starts and completed afterwards, so runs
-killed by the OOM killer or the time limit are still visible (status "started").
+                         which runs in one process, and for runs shorter than the sampling interval
+
+A record is written before the computation starts and completed afterwards, so runs killed by the OOM killer or
+the time limit are still visible (status "started").
 
 Run from truncated_graphs/src:
   python correction_benchmark/runtime_scaling.py --method bosperrus --graph knn --n 10000
@@ -42,10 +44,11 @@ CORES = int(os.environ.get("SLURM_CPUS_ON_NODE", os.cpu_count()))
 # must be set before graph-tool is imported
 os.environ["OMP_NUM_THREADS"] = str(CORES if ARGS.method == "bosperrus" else 1)
 
+import resource  # noqa: E402
+
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 import psutil  # noqa: E402
-import resource  # noqa: E402
 from bosperrus import Flow, construct_graph, distance_to_rectangular_border  # noqa: E402
 from bosperrus.centrality_measures import compute_centrality_measures  # noqa: E402
 
@@ -72,19 +75,21 @@ class PeakMemory:
         self._t.start()
         return self
 
-    def __exit__(self, *exc):
+    def __exit__(self, *_):
         self._stop.set()
         self._t.join()
         self.peak = max(self.peak, psutil.virtual_memory().used - self.base)
 
 
 def write(record, path):
+    """Write the run record as JSON atomically (via a temp file), so a killed run leaves a readable file."""
     with open(path + ".tmp", "w") as f:
         json.dump(record, f, indent=1)
     os.replace(path + ".tmp", path)
 
 
 def main():
+    """Time (and track memory of) one method on one random graph; records progress in a JSON per run."""
     os.makedirs(ARGS.out_dir, exist_ok=True)
     path = os.path.join(ARGS.out_dir, f"{ARGS.method}_{ARGS.graph}_{ARGS.n}.json")
     record = {**vars(ARGS), "cores": CORES, "host": platform.node(), "cpu": platform.processor(),
@@ -94,7 +99,10 @@ def main():
     rng = np.random.default_rng(ARGS.seed)
     coords = rng.uniform(0, np.sqrt(ARGS.n), size=(ARGS.n, 2))
     t0 = time.perf_counter()
-    edges = construct_graph(coords, ARGS.graph, k=ARGS.k) if ARGS.graph == "knn" else construct_graph(coords, "delaunay")
+    if ARGS.graph == "knn":
+        edges = construct_graph(coords, "knn", k=ARGS.k)
+    else:
+        edges = construct_graph(coords, "delaunay")
     record.update(t_graph=time.perf_counter() - t0, n_edges=len(edges))
     write(record, path)
 

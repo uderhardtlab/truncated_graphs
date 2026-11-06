@@ -86,39 +86,3 @@ def peel_sweep(array_row, array_col, counts_by_label, min_group_size=30, connect
         not_sig = sub["p_value"] >= 0.05
         buffers[label] = sub.loc[not_sig, "layer"].min() - 1 if not_sig.any() else np.nan
     return sweep_df, buffers
-
-
-def plot_peel_sweep(ax, sweep_df, counts_labels, colors,
-                     xlabel="peel iteration (topological layers from border)",
-                     ylabel=None, sig_threshold=0.05, sig_line_color="gray",
-                     ylim_bottom=None):
-    """Plot p-value vs. peel layer for each label in counts_labels, from a
-    long-form sweep_df (columns: 'counts', 'layer', 'p_value') as returned by
-    peel_sweep. Draws a dashed vertical line, in each label's own color, at
-    the first peel layer where that label's p-value stops being significant
-    (BLADE keeps that layer; its buffer is the layers before it).
-
-    ylim_bottom clips the (log-scale) y-axis at this value — Welch t-tests on
-    large samples routinely produce p-values many orders of magnitude smaller
-    than sig_threshold, which otherwise stretch the axis and squash the
-    interesting region near sig_threshold. Points below it are simply out of
-    view, not removed from sweep_df.
-    """
-    for label in counts_labels:
-        sub = sweep_df[sweep_df["counts"] == label]
-        if not len(sub):
-            continue
-        ax.plot(sub["layer"], sub["p_value"], marker="o", ms=3,
-                color=colors[label], label=label)
-        sig = sub["p_value"] >= sig_threshold
-        if sig.any():
-            buffer = sub.loc[sig, "layer"].min()
-            ax.axvline(buffer, color=colors[label], lw=1, ls="--", alpha=0.8)
-    ax.axhline(sig_threshold, color=sig_line_color, ls="--", lw=1)
-    ax.set_yscale("log")
-    if ylim_bottom is not None:
-        ax.set_ylim(bottom=ylim_bottom)
-    ax.set_xlabel(xlabel)
-    if ylabel:
-        ax.set_ylabel(ylabel)
-    ax.legend(fontsize=7)

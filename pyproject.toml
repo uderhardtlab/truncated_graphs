@@ -44,3 +44,10 @@ timezonefinder = ">=9.0.0,<10"
 
 [tool.pixi.pypi-dependencies]
 bosperrus = { path = "../bosperrus-package", editable = true }
+
+[tool.ruff]
+line-length = 120
+extend-exclude = ["src/archive", "figure_plotting/archive"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "I", "UP"]

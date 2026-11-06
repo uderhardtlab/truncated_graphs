@@ -23,11 +23,10 @@ from pathlib import Path
 import pandas as pd
 import scanpy as sc
 import squidpy as sq
-from scipy.sparse import triu
-
 from bosperrus import Flow
 from bosperrus.centrality_measures import compute_centrality_measures
 from bosperrus.distances import distance_to_convex_hull
+from scipy.sparse import triu
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 IMC_H5AD = ROOT / "data" / "anndata" / "imc.h5ad"  # sq.datasets.imc(path=...)
@@ -36,18 +35,19 @@ MEASURES = ["degree", "clustering", "closeness"]
 
 
 def main():
+    """squidpy kNN graph of the IMC FOV, per-cell centralities raw and corrected -> OUT_CSV."""
     adata = sc.read_h5ad(IMC_H5AD)
     sq.gr.spatial_neighbors(adata)  # squidpy default, as in the tutorial
     A = adata.obsp["spatial_connectivities"]
     rows, cols = triu(A + A.T, 1).nonzero()  # undirected, as squidpy's nx.Graph(A)
-    edges = {frozenset((int(i), int(j))) for i, j in zip(rows, cols)}
+    edges = {frozenset((int(i), int(j))) for i, j in zip(rows, cols, strict=True)}
     scores = compute_centrality_measures(edges, N=adata.n_obs, measures=MEASURES)
     coords = adata.obsm["spatial"]
     d = distance_to_convex_hull(coords)
     flow = Flow.from_distances_and_scores(distances=d, scores=scores)
     flow.flow()
 
-    colors = dict(zip(adata.obs["cell type"].cat.categories, adata.uns["cell type_colors"]))
+    colors = dict(zip(adata.obs["cell type"].cat.categories, adata.uns["cell type_colors"], strict=True))
     out = pd.DataFrame({"cell_type": adata.obs["cell type"].astype(str).values,
                         "color": adata.obs["cell type"].map(colors).astype(str).values,
                         "x": coords[:, 0], "y": coords[:, 1], "d": d.values})

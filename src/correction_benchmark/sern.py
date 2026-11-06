@@ -1,17 +1,26 @@
-import numpy as np
+"""
+SERN (spatially embedded random networks; Rheinwalt et al. 2012) as a boundary-effect correction baseline.
+
+The link probability of a node pair is estimated as a function of its distance (fraction of node pairs per
+distance bin that are linked in the observed graph). Each surrogate draws every pair independently with that
+probability, which keeps the edge-length distribution but removes everything else; the median centrality over
+the surrogates estimates the part of a node's centrality that its position alone explains (including the border).
+sphere.py subtracts it from the observed centrality. Used by sphere.py and runtime_scaling.py.
+"""
 import os
 import tempfile
 import warnings
-import joblib
-from scipy.spatial.distance import pdist
-from joblib import Parallel, delayed
-from tqdm import tqdm
 
-from bosperrus import *
+import joblib
+import numpy as np
+from bosperrus.centrality_measures import compute_centrality_measures
+from joblib import Parallel, delayed
+from scipy.spatial.distance import pdist
+from tqdm import tqdm
 
 
 def generate_sern_vectorized(pair_probs, rows, cols, rng):
-    # Create the probability mask for all possible edges
+    """One surrogate edge list: each node pair (rows[i], cols[i]) is linked with probability pair_probs[i]."""
     mask = rng.random(len(pair_probs)) < pair_probs
 
     # rows/cols are the precomputed upper-triangle (i, j) indices, in the
@@ -19,7 +28,9 @@ def generate_sern_vectorized(pair_probs, rows, cols, rng):
     edges = np.column_stack((rows[mask], cols[mask]))
     return edges
 
+
 def surrogate_worker_mmap(seed, prob_path, triu_path, N, measures):
+    """Centralities of one surrogate; pair probabilities and pair indices are read from shared memory-mapped files."""
     # mmap_mode='r' ensures all workers read the same physical RAM
     pair_probs = joblib.load(prob_path, mmap_mode='r')
     rows, cols = joblib.load(triu_path, mmap_mode='r')
@@ -28,8 +39,13 @@ def surrogate_worker_mmap(seed, prob_path, triu_path, N, measures):
     edges = generate_sern_vectorized(pair_probs, rows, cols, rng)
     return compute_centrality_measures(edges, N, measures)
 
+
 def surrogate_ensemble_gt(coords, edge_list, n_bins, measures, n_surrogates=200, n_jobs=-1):
-    # 1. Calculate probabilities (keeping your existing logic)
+    """Per-node median of `measures` over `n_surrogates` SERN surrogates of the graph (coords, edge_list).
+
+    Surrogate seeds are drawn from numpy's global RNG, so seed it for reproducible ensembles.
+    """
+    # 1. distance-dependent link probability per node pair
     p, bin_edges, pair_bins = estimate_link_probability(coords, edge_list, n_bins)
     pair_probs = build_pair_probabilities(pair_bins, p)
     N = len(coords)
@@ -79,7 +95,8 @@ def surrogate_ensemble_gt(coords, edge_list, n_bins, measures, n_surrogates=200,
         if len(present) < len(results):
             warnings.warn(
                 f"SERN: {key} failed on {len(results) - len(present)}/{len(results)} "
-                f"surrogates; median taken over the remaining {len(present)}"
+                f"surrogates; median taken over the remaining {len(present)}",
+                stacklevel=2,
             )
         values = np.array(present)
         with warnings.catch_warnings():
@@ -90,13 +107,15 @@ def surrogate_ensemble_gt(coords, edge_list, n_bins, measures, n_surrogates=200,
         if n_nan:
             warnings.warn(
                 f"SERN: {key} is NaN in every surrogate for {n_nan}/{N} nodes; "
-                "leaving their boundary-effect estimate as NaN"
+                "leaving their boundary-effect estimate as NaN",
+                stacklevel=2,
             )
         medians[key] = measure_medians
     return medians
 
 
 def estimate_link_probability(coords, edge_list, n_bins):
+    """Link probability per distance bin (linked pairs / all pairs), the bin edges and every pair's bin index."""
     coords = np.asarray(coords, dtype=np.float32)
     dists = pdist(coords)
     bin_edges = np.linspace(dists.min(), dists.max(), n_bins + 1)
@@ -121,6 +140,9 @@ def estimate_link_probability(coords, edge_list, n_bins):
     p = np.divide(B, A, out=np.zeros_like(B), where=A > 0)
     return p.astype(np.float32), bin_edges, pair_bins
 
+
+
 def build_pair_probabilities(pair_bins, p):
+    """Link probability of every node pair (in pdist order) from its distance bin."""
     return p[pair_bins]
 

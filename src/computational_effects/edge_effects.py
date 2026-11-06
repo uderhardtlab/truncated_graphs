@@ -24,9 +24,9 @@ from statsmodels.stats.multitest import multipletests
 from tqdm import tqdm
 
 ROOT = Path(__file__).resolve().parent.parent.parent
-sys.path.insert(0, str(Path(__file__).resolve().parent))  # this dir: border_effects_kNN_del.py lives alongside this script
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # border_effects_kNN_del.py lives next to this script
 
-from border_effects_kNN_del import get_mibitof, get_squidpy_visium_datasets, trunc_graphs
+from border_effects_kNN_del import get_mibitof, get_squidpy_visium_datasets, trunc_graphs  # noqa: E402
 
 COORDS_PICKLE = ROOT / "mibitof_coords" / "coords.pickle"
 DEL_CSV       = ROOT / "results" / "computational_effects" / "edge_effects" / "del_trunc.csv"

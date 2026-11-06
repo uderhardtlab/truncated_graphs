@@ -25,21 +25,19 @@ construction, centrality computation, distance calculation, fitting and
 evaluation now delegate to the bosperrus package via the Flow class.
 """
 
+import os
+from time import time
+
 import numpy as np
 import pandas as pd
+from bosperrus import Flow, construct_graph
+from bosperrus.centrality_measures import compute_centrality_measures
 from scipy.interpolate import BSpline
 from scipy.spatial import ConvexHull, Delaunay
 from scipy.stats import pearsonr, spearmanr, vonmises_fisher
-
-from time import time
+from sern import surrogate_ensemble_gt
 from tqdm import trange
 
-from bosperrus import Flow, construct_graph
-from bosperrus.centrality_measures import compute_centrality_measures
-
-from sern import surrogate_ensemble_gt
-
-import os
 os.environ["OMP_NUM_THREADS"] = "8"
 
 # Rheinwalt et al. 2012 use 1000 surrogates, but their Fig. 2 shows reliability
@@ -105,7 +103,8 @@ def _stereographic_delaunay_edges(coords, pole):
     """
     pole = pole / np.linalg.norm(pole)
     a = np.array([1.0, 0, 0]) if abs(pole[0]) < 0.9 else np.array([0, 1.0, 0])
-    e1 = np.cross(pole, a); e1 /= np.linalg.norm(e1)
+    e1 = np.cross(pole, a)
+    e1 /= np.linalg.norm(e1)
     e2 = np.cross(pole, e1)
     denom = 1 - coords @ pole
     xy = np.column_stack((coords @ e1, coords @ e2)) / denom[:, None]
@@ -124,7 +123,7 @@ def _prune_long_edges(coords, edges):
     length = np.arccos(np.clip(np.einsum("ij,ij->i", coords[u], coords[v]), -1.0, 1.0))
     q1, q3 = np.percentile(length, [25, 75])
     whisker = length[length <= q3 + 1.5 * (q3 - q1)].max()
-    return {e for e, keep in zip(edges, length <= whisker) if keep}
+    return {e for e, keep in zip(edges, length <= whisker, strict=True) if keep}
 
 
 def get_edge_list(coords, edge_type, k=None, r=None, pole=None):
@@ -144,6 +143,8 @@ def get_edge_list(coords, edge_type, k=None, r=None, pole=None):
 
 
 def crop_cap(coords, cap_radius, rng=None, return_center=False):
+    """Cap of geodesic radius cap_radius around a random point: indices inside, their distance to the cap border
+    (Series indexed by node) and, with return_center, the centre."""
     if rng is None:
         rng = np.random.default_rng()
     center = coords[rng.choice(len(coords))]
@@ -173,7 +174,10 @@ def log_correction(distances, S, s):
     return pd.Series(s * np.expm1(bf.observations["BOSPERRUS corrected y"].to_numpy()), index=S.index)
 
 
-def pspline_gcv(x, y, n_knots=40, lams=np.logspace(-2, 8, 51), return_path=False):
+PSPLINE_LAMBDAS = np.logspace(-2, 8, 51)  # penalty weights searched by GCV
+
+
+def pspline_gcv(x, y, n_knots=40, lams=PSPLINE_LAMBDAS, return_path=False):
     """Cubic P-spline (equally spaced knots, second-difference penalty) with lambda minimising GCV.
 
     Used instead of scipy's make_smoothing_spline, whose GCV search down to lambda -> 0 fails
@@ -244,6 +248,7 @@ def multiplicative_correction(bf, m):
 
 
 def get_sern_median(crop_coords, local_edges, measures):
+    """Per-node SERN surrogate median of each measure on the crop graph (sqrt(#edges) distance bins)."""
     n_bins = int(np.sqrt(len(local_edges)))
     sern_median = surrogate_ensemble_gt(
         coords=crop_coords,
@@ -266,6 +271,9 @@ def _corr(corr_fn, x, y, ok=None):
 
 
 def process_coords(coords, edge_type, cap_radii, k=None, r=None, rng=None):
+    """One point set and graph type: global centralities, then per cap radius a crop, all corrections on the crop
+    graph, and the correlation of each with the uncropped centralities (all crop nodes and the border-near
+    quartile). Returns a DataFrame with one row per measure, correlation method and node subset."""
     N = len(coords)
 
     # --- global graph & centralities ---
@@ -295,23 +303,22 @@ def process_coords(coords, edge_type, cap_radii, k=None, r=None, rng=None):
         cap_measures = [m for m in measures if m in BOSPERRUS_results.columns and m in sern_median.columns]
 
         # --- assemble result frame ---
+        def sorted_cols(df, prefix="", measures=cap_measures):
+            """The columns of `measures` (optionally "<prefix> <measure>"), rows and columns sorted."""
+            cols = [f"{prefix} {m}" if prefix else m for m in measures]
+            return df[cols].sort_index(axis=0).sort_index(axis=1)
+
         results = pd.concat(
             {
-                "original": global_centralities.loc[crop, cap_measures].sort_index(axis=0).sort_index(axis=1).reset_index(drop=True),
-                "crop": BOSPERRUS_results[cap_measures].sort_index(axis=0).sort_index(axis=1),
+                "original": sorted_cols(global_centralities.loc[crop]).reset_index(drop=True),
+                "crop": sorted_cols(BOSPERRUS_results),
                 "distance": BOSPERRUS_results["distance_to_cap"],
-                "BOSPERRUS_corrections": BOSPERRUS_results[[f"BOSPERRUS corrected {m}" for m in cap_measures]].sort_index(axis=0).sort_index(axis=1),
-                "BOSPERRUS_multiplicative": BOSPERRUS_results[[f"BOSPERRUS multiplicative {m}" for m in cap_measures]].sort_index(axis=0).sort_index(axis=1),
-                "BOSPERRUS_log": BOSPERRUS_results[[f"BOSPERRUS log {m}" for m in cap_measures]].sort_index(axis=0).sort_index(axis=1),
-                **{
-                    f"{kind}_detrended": BOSPERRUS_results[[f"{kind} detrended {m}" for m in cap_measures]].sort_index(axis=0).sort_index(axis=1)
-                    for kind in DETREND_KINDS
-                },
-                "sern": sern_median[cap_measures].sort_index(axis=0).sort_index(axis=1),
-                "sern_corrected": (
-                    BOSPERRUS_results[cap_measures].sort_index(axis=0).sort_index(axis=1)
-                    - sern_median[cap_measures].sort_index(axis=0).sort_index(axis=1)
-                ),
+                "BOSPERRUS_corrections": sorted_cols(BOSPERRUS_results, "BOSPERRUS corrected"),
+                "BOSPERRUS_multiplicative": sorted_cols(BOSPERRUS_results, "BOSPERRUS multiplicative"),
+                "BOSPERRUS_log": sorted_cols(BOSPERRUS_results, "BOSPERRUS log"),
+                **{f"{kind}_detrended": sorted_cols(BOSPERRUS_results, f"{kind} detrended") for kind in DETREND_KINDS},
+                "sern": sorted_cols(sern_median),
+                "sern_corrected": sorted_cols(BOSPERRUS_results) - sorted_cols(sern_median),
             },
             axis=1,
         )
@@ -338,7 +345,8 @@ def process_coords(coords, edge_type, cap_radii, k=None, r=None, rng=None):
         for corr_name, corr_fn in CORRELATION_METHODS.items():
             for subset_name, subset_mask in node_subsets.items():
                 sub = results[subset_mask]
-                rows = {k: [] for k in ["crop", "corrected", "mult", "log", *DETREND_KINDS, "sern", "crop_sern", "n_excluded"]}
+                keys = ["crop", "corrected", "mult", "log", *DETREND_KINDS, "sern", "crop_sern", "n_excluded"]
+                rows = {k: [] for k in keys}
 
                 for m in cap_measures:
                     cols = {
@@ -357,7 +365,8 @@ def process_coords(coords, edge_type, cap_radii, k=None, r=None, rng=None):
                     for key in ["crop", "corrected", "mult", "log", *DETREND_KINDS]:
                         rows[key].append(_corr(corr_fn, cols["original"], cols[key], ok))
                     rows["sern"].append(_corr(corr_fn, cols["original"], cols["sern"], ok) if RUN_SERN else np.nan)
-                    rows["crop_sern"].append(_corr(corr_fn, cols["crop"], cols["sern_values"], ok) if RUN_SERN else np.nan)
+                    rows["crop_sern"].append(
+                        _corr(corr_fn, cols["crop"], cols["sern_values"], ok) if RUN_SERN else np.nan)
                     rows["n_excluded"].append(int((~ok).sum()))
 
                 correlations = pd.DataFrame(index=cap_measures)
@@ -373,14 +382,15 @@ def process_coords(coords, edge_type, cap_radii, k=None, r=None, rng=None):
                 correlations["cap_radius"] = cap_radius
                 correlations["corr_method"] = corr_name
                 correlations["node_subset"] = subset_name
-                correlations["n_mult_nan"] = [
-                    int(sub["BOSPERRUS_multiplicative"][f"BOSPERRUS multiplicative {m}"].isna().sum()) for m in cap_measures
-                ]
+                mult = sub["BOSPERRUS_multiplicative"]
+                correlations["n_mult_nan"] = [int(mult[f"BOSPERRUS multiplicative {m}"].isna().sum())
+                                              for m in cap_measures]
                 all_correlations.append(correlations)
     return pd.concat(all_correlations)
 
 
 def main(n_runs=N_OF_RUNS, n=5000, n_surrogates=NUMBER_OF_SERNS, output_dir=OUTPUT_DIR, seed=None, run_sern=True):
+    """n_runs runs (seeds seed, seed + 1, ...): three point patterns x all graph types, one CSV per run."""
     global NUMBER_OF_SERNS, RUN_SERN
     NUMBER_OF_SERNS = n_surrogates
     RUN_SERN = run_sern

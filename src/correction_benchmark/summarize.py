@@ -7,9 +7,8 @@ Output: ../results/correction_benchmark/summary.csv (printed as well)
 """
 import numpy as np
 import pandas as pd
-from scipy.stats import wilcoxon
-
 from load_results import load_sphere
+from scipy.stats import wilcoxon
 
 COLS = {"original vs. on crop": "raw", "original vs. BOSPERRUS corrected on crop": "additive",
         "original vs. BOSPERRUS multiplicative on crop": "multiplicative", "original vs. BOSPERRUS log on crop": "log",
@@ -18,6 +17,10 @@ COLS = {"original vs. on crop": "raw", "original vs. BOSPERRUS corrected on crop
 
 
 def main():
+    """Per correlation method, node subset, graph type and measure: median correlation with the uncropped graph of
+    every method, and how often (and how significantly, Wilcoxon) each variant beats additive BOSPERRUS.
+
+    Writes ../results/correction_benchmark/summary.csv."""
     df = load_sphere("../results/correction_benchmark")
     df = df.rename(columns=COLS)
     # r-NN r = 0.05 excluded, as in figure_plotting/correction_benchmark/sphere_benchmark_helpers.py
