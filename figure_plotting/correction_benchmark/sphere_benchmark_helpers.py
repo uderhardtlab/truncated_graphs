@@ -19,9 +19,7 @@ from pathlib import Path
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
 import seaborn as sns
-
 from matplotlib.gridspec import GridSpecFromSubplotSpec
 from scipy.spatial import ConvexHull
 from scipy.stats import vonmises_fisher
@@ -31,11 +29,13 @@ sys.path.insert(0, str(ROOT / "src" / "correction_benchmark"))  # load_results, 
 
 from load_results import load_sphere  # noqa: E402
 
-METHOD_PALETTE = {"raw": "grey", "linear": "#D9C27E", "spline": "#A8842A", "bosperrus": "#8ABBD6", "bosperrus_log": "#1B3F66",
+METHOD_PALETTE = {"raw": "grey", "linear": "#D9C27E", "spline": "#A8842A", "bosperrus": "#8ABBD6",
+                  "bosperrus_log": "#1B3F66",
                   "SERN": "#E59EDD"}
 # raw first as the reference, then by overall average rank (best first)
 METHOD_ORDER = ["raw", "bosperrus_log", "bosperrus", "spline", "linear", "SERN"]
-METHOD_LABELS = {"raw": "raw", "linear": "linear detr.", "spline": "spline detr.", "bosperrus": "bosperrus add.", "bosperrus_log": "bosperrus log", "SERN": "SERN"}
+METHOD_LABELS = {"raw": "raw", "linear": "linear detr.", "spline": "spline detr.", "bosperrus": "bosperrus add.",
+                 "bosperrus_log": "bosperrus log", "SERN": "SERN"}
 ROW_ORDER = ["delaunay", "knn", "rnn"]
 ROW_LABELS = {"delaunay": "Delaunay", "knn": "$k$-NN", "rnn": "$r$-NN"}
 TEXTWIDTH = (8.5 * 2.54 - 4.0) / 2.54  # letterpaper, 2 cm margins
@@ -109,7 +109,8 @@ def plot_sphere(ax, coords, view, title, center=None, centers=()):
         labels = np.repeat(np.arange(len(centers)), len(coords) // len(centers))
         idx = np.where(front)[0]
         idx = idx[np.random.default_rng(0).permutation(len(idx))]  # no cluster systematically on top
-        ax.scatter(coords[idx] @ e1, coords[idx] @ e2, s=0.8, c=[CLUSTER_COLORS[centers[l][1]] for l in labels[idx]],
+        point_colors = [CLUSTER_COLORS[centers[lab][1]] for lab in labels[idx]]
+        ax.scatter(coords[idx] @ e1, coords[idx] @ e2, s=0.8, c=point_colors,
                    linewidths=0, alpha=0.8, rasterized=True)
     else:
         for mask, color in layers:
@@ -126,7 +127,8 @@ def plot_sphere(ax, coords, view, title, center=None, centers=()):
 
 
 def _mark_centers(ax, centers, view, e1, e2):
-    """Cluster centres in their cluster colour: filled if on the visible hemisphere, open otherwise; labelled with kappa."""
+    """Cluster centres in their cluster colour: filled if on the visible hemisphere, open otherwise; labelled with
+    kappa."""
     for mu, kappa in centers:
         front = mu @ view > 0
         x, y = mu @ e1, mu @ e2
@@ -167,13 +169,15 @@ def plot_crop_schematic(ax, view, title, n=180, seed=3):
     center /= np.linalg.norm(center)
     inside = np.arccos(np.clip(pts @ center, -1, 1)) <= CAP_RADIUS
     front = pts @ view > 0
-    edges = {tuple(sorted((a, b))) for t in ConvexHull(pts).simplices for a, b in [(t[0], t[1]), (t[1], t[2]), (t[0], t[2])]}
+    edges = {tuple(sorted((a, b))) for t in ConvexHull(pts).simplices
+             for a, b in [(t[0], t[1]), (t[1], t[2]), (t[0], t[2])]}
     for a, b in edges:
         if front[a] and front[b]:
             kept = inside[a] and inside[b]
             ax.plot([pts[a] @ e1, pts[b] @ e1], [pts[a] @ e2, pts[b] @ e2], color="#333333" if kept else "#bbbbbb",
                     lw=0.4, zorder=1 if not kept else 2)
-    ax.scatter(pts[front] @ e1, pts[front] @ e2, s=2.5, c=np.where(inside[front], "#333333", "#bbbbbb"), linewidths=0, zorder=3)
+    ax.scatter(pts[front] @ e1, pts[front] @ e2, s=2.5, c=np.where(inside[front], "#333333", "#bbbbbb"),
+               linewidths=0, zorder=3)
     t = np.linspace(0, 2 * np.pi, 400)
     ax.plot(np.cos(t), np.sin(t), color="k", lw=0.5)
     _, u, w = _basis(center)
@@ -191,7 +195,7 @@ def pattern_gain(df, graph, measure, coords):
 def plot_pattern_heatmaps(axes, df):
     """One 2 x 3 block per measure (rows: point pattern, columns: graph type), under its violin column."""
     measures = sorted(df["measure"].unique())
-    for c, (ax, m) in enumerate(zip(axes, measures)):
+    for c, (ax, m) in enumerate(zip(axes, measures, strict=True)):
         vals = np.array([[pattern_gain(df, g, m, coords) for g in ROW_ORDER] for coords in PATTERNS.values()])
         im = ax.imshow(vals, cmap="RdBu", vmin=-HEAT_LIM, vmax=HEAT_LIM, aspect="auto")
         for i in range(vals.shape[0]):
@@ -247,7 +251,8 @@ def plot_violins(axes, df):
             if r == 0:
                 ax.set_title(MEASURE_LABELS[m], fontsize=6.5, pad=7)
             if r == len(ROW_ORDER) - 1:
-                ax.set_xticks(range(len(METHOD_ORDER)), [METHOD_LABELS[mm] for mm in METHOD_ORDER], rotation=90, fontsize=5.5)
+                ax.set_xticks(range(len(METHOD_ORDER)), [METHOD_LABELS[mm] for mm in METHOD_ORDER], rotation=90,
+                              fontsize=5.5)
             else:
                 ax.set_xticks(range(len(METHOD_ORDER)), [])
 
@@ -276,11 +281,13 @@ def make_figure(all_dfs):
             cand /= np.linalg.norm(cand, axis=1)[:, None]
             view = cand[np.argmax((cand @ mus.T).min(axis=1))]
         ax = fig.add_subplot(top[k])
-        plot_sphere(ax, coords, view, "clustered, " + ", ".join(f"$\\kappa$ = {kk}" if i == 0 else str(kk) for i, kk in enumerate(kappas)),
+        title = "clustered, " + ", ".join(f"$\\kappa$ = {kk}" if i == 0 else str(kk) for i, kk in enumerate(kappas))
+        plot_sphere(ax, coords, view, title,
                     centers=centers)
     plot_crop_schematic(fig.add_subplot(top[3]), v, f"crop: cap of radius {CAP_RADIUS:.2g} rad")
     for k in range(4):
-        fig.axes[k].text(-0.02, 1.0, "abcd"[k], transform=fig.axes[k].transAxes, fontsize=8, fontweight="bold", va="top")
+        fig.axes[k].text(-0.02, 1.0, "abcd"[k], transform=fig.axes[k].transAxes, fontsize=8, fontweight="bold",
+                         va="top")
 
     # e: violins, f: uniform vs. clustered gain under each violin column
     bottom = GridSpecFromSubplotSpec(len(ROW_ORDER) + 2, len(measures), outer[1],

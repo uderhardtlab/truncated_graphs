@@ -4,13 +4,12 @@ microns/ (src/physically_realized_graphs/microns_buffer.py)."""
 import json
 from pathlib import Path
 
+import bosperrus
 import numpy as np
 import pandas as pd
 import shapely.wkt
 from matplotlib import pyplot as plt
 from matplotlib.lines import Line2D
-
-import bosperrus
 
 RES = Path(__file__).resolve().parent.parent.parent / "results" / "physically_realized_graphs" / "microns"
 

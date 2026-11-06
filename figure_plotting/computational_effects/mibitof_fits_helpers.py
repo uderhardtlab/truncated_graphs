@@ -59,17 +59,16 @@ import json
 from pathlib import Path
 
 import matplotlib
-matplotlib.rcParams["svg.fonttype"] = "none"  # keep SVG text as editable <text>, not outlined paths
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from bosperrus.fit import ExponentialSaturationFit, MichaelisMentenFit, PiecewiseLinearFit
 from matplotlib.collections import LineCollection
 from matplotlib.colors import to_rgba
 from matplotlib.gridspec import GridSpec
 from scipy.stats import gaussian_kde, norm
 
-from bosperrus.fit import PiecewiseLinearFit, ExponentialSaturationFit, MichaelisMentenFit
-
+matplotlib.rcParams["svg.fonttype"] = "none"  # keep SVG text as editable <text>, not outlined paths
 ROOT = Path(__file__).resolve().parent.parent.parent
 
 MEASURES = ["degree", "clustering", "closeness", "betweenness"]
@@ -95,9 +94,12 @@ _EPS = 1e-10
 SPIKE_SIGMA_FRAC = 0.02
 
 CURVE_FN = {
-    "Piecewise Linear Fit": lambda d, r: PiecewiseLinearFit.piecewise_plateau(d, r["piecewise_linear_b"], r["piecewise_linear_m"], r["piecewise_linear_c"]),
-    "Exponential Saturation Fit": lambda d, r: ExponentialSaturationFit.exp_sat(d, r["exponential_saturation_a"], r["exponential_saturation_b"], r["exponential_saturation_c"]),
-    "Michaelis-Menten Fit": lambda d, r: MichaelisMentenFit.michaelis_menten(d, r["michaelis_menten_a"], r["michaelis_menten_b"], r["michaelis_menten_c"]),
+    "Piecewise Linear Fit": lambda d, r: PiecewiseLinearFit.piecewise_plateau(
+        d, r["piecewise_linear_b"], r["piecewise_linear_m"], r["piecewise_linear_c"]),
+    "Exponential Saturation Fit": lambda d, r: ExponentialSaturationFit.exp_sat(
+        d, r["exponential_saturation_a"], r["exponential_saturation_b"], r["exponential_saturation_c"]),
+    "Michaelis-Menten Fit": lambda d, r: MichaelisMentenFit.michaelis_menten(
+        d, r["michaelis_menten_a"], r["michaelis_menten_b"], r["michaelis_menten_c"]),
 }
 
 X_GRID = np.linspace(0, D_MAX_APPROX, 60)
@@ -112,7 +114,8 @@ def load_data():
     type's true share of the cell's datasets."""
     dfs = []
     for gt in REPRESENTATIVE.values():
-        df = pd.read_csv(ROOT / "results" / "computational_effects" / "mibitof_fits" / f"{gt}_graph_level_fits.csv", index_col=0)
+        fits_csv = ROOT / "results" / "computational_effects" / "mibitof_fits" / f"{gt}_graph_level_fits.csv"
+        df = pd.read_csv(fits_csv, index_col=0)
         df["graph_type"] = gt
         df["measure"] = df.index
         dfs.append(df)
@@ -260,10 +263,12 @@ def plot_imc(fig, gs, row, imc):
             ax.set_xlabel("median distance to border / d_max", fontsize=6.5)
             ax.set_title("position", fontsize=8, pad=3)
             ax.tick_params(labelleft=False)
-            ax.legend(*axes[0].get_legend_handles_labels(), frameon=False, fontsize=6, loc="center left", bbox_to_anchor=(1.0, 0.5),
+            ax.legend(*axes[0].get_legend_handles_labels(), frameon=False, fontsize=6, loc="center left",
+                      bbox_to_anchor=(1.0, 0.5),
                       handletextpad=0.1)
             continue
-        raw, corrected = relative_means(imc, measure, "raw").loc[order.index], relative_means(imc, measure, "corrected").loc[order.index]
+        raw = relative_means(imc, measure, "raw").loc[order.index]
+        corrected = relative_means(imc, measure, "corrected").loc[order.index]
         ax.axvline(0, color="#cccccc", lw=0.6, zorder=0)
         ax.hlines(y, raw, corrected, color="#bbbbbb", lw=1, zorder=1)
         ax.scatter(raw, y, facecolor="white", edgecolor=colors, s=14, lw=1, zorder=2, label="raw")
