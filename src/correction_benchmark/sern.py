@@ -43,7 +43,8 @@ def surrogate_worker_mmap(seed, prob_path, triu_path, N, measures):
 def surrogate_ensemble_gt(coords, edge_list, n_bins, measures, n_surrogates=200, n_jobs=-1):
     """Per-node median of `measures` over `n_surrogates` SERN surrogates of the graph (coords, edge_list).
 
-    Surrogate seeds are drawn from numpy's global RNG, so seed it for reproducible ensembles.
+    Surrogate seeds are drawn from numpy's global RNG, so seed it to get the same surrogate graphs (their
+    centralities can still differ slightly between runs where graph-tool sums multithreaded, e.g. betweenness).
     """
     # 1. distance-dependent link probability per node pair
     p, bin_edges, pair_bins = estimate_link_probability(coords, edge_list, n_bins)
