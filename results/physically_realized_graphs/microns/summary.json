@@ -2,17 +2,17 @@
  "nbins": 51,
  "alpha_shape": 0.0001,
  "reimann_thresh": 0.05,
- "elbow_nm": 140578.16706729392,
+ "elbow_nm": 145309.8260132466,
  "piecewise_linear_fits": {
   "indegree": {
    "piecewise_linear_b": 140578.16706729392,
-   "piecewise_linear_m": 0.0012854936694292668,
-   "piecewise_linear_c": 48.59824534072813
+   "piecewise_linear_m": 0.001285493669429268,
+   "piecewise_linear_c": 48.59824534072801
   },
   "degree": {
    "piecewise_linear_b": 145309.8260132466,
-   "piecewise_linear_m": 0.0026346437583813333,
-   "piecewise_linear_c": 87.08379070699223
+   "piecewise_linear_m": 0.002634643758381332,
+   "piecewise_linear_c": 87.08379070699235
   }
  },
  "x_edges_um": [
@@ -121,9 +121,9 @@
   1104.1825800000001,
   1114.601
  ],
- "jaccard_neuron": 0.5003860407659049,
- "jaccard_bin": 0.8309496010897062,
- "n_bosperrus": 38777,
+ "jaccard_neuron": 0.48677592893782057,
+ "jaccard_bin": 0.8222890129287724,
+ "n_bosperrus": 39897,
  "n_reimann_neuron": 19522,
  "n_reimann_bin": 36497,
  "n_total": 59433

@@ -27,7 +27,13 @@ Usage (cwd = truncated_graphs/):
     --tissue-edge --resolution R   elbow only (no BLADE) at any bin size, zero-count bins kept (resolution check)
 
 Every elbow fit is rising-only (bosperrus.RisingPiecewiseLinearFit) and uses only bins within
-TISSUE_FIT_MAX_DISTANCE_UM of the border.
+TISSUE_FIT_MAX_DISTANCE_UM of the border. In the --image-mask, --in-tissue and --tissue-edge modes each elbow is
+then tested with bosperrus.interior_window_test against interior windows of its own component (side
+2 * TISSUE_FIT_MAX_DISTANCE_UM, steepness statistic with the half-life floored at MIN_HALF_LIFE_UM, at most 50%
+overlap, >= 19 windows); non-significant buffers
+are cleared, components too small for 19 windows (about < 0.8 mm across) are untested (p_value NaN) and keep their
+buffer as fitted. The per-component JSON entries carry p_value, p_min, significant, buffer_dropped, steepness,
+n_windows and windows.
 
 Writes to results/spatial_omics/st_reroll/:
     {sample}_filtered_bins.parquet  one row per filtered bin (+ virtual=True rows for filled
@@ -62,10 +68,14 @@ RESOLUTION_UM = 8.0
 MIN_COMPONENT_SPOTS = 1000
 # fill enclosed empty holes up to 16 bins at 8um (see identify_analysis_buffer_from_filtered)
 MAX_HOLE_AREA_UM2 = 1024.0
-# the elbow is fitted only on bins within this distance of the border: ~10x the observed elbows, short
-# enough that a narrow edge dip is not swamped by tissue-scale gradients, and the depth the smallest
-# interior windows (500 um, see interior_windows.py) reach, so edges and windows share one fit range
-TISSUE_FIT_MAX_DISTANCE_UM = 250.0
+# the elbow is fitted only on bins within this distance of the border: 2-6x the observed elbows (15-55 um), short
+# enough that a narrow edge dip is not swamped by tissue-scale gradients; also the fit depth of the interior
+# windows (side 2x this, bosperrus.interior_window_test), so components from ~0.8 mm across are testable
+TISSUE_FIT_MAX_DISTANCE_UM = 100.0
+# floor of the half-life in the interior-window steepness statistic: the tissue edge is only defined to the image
+# mask's precision (2.1-5.2 um per pixel); without it, windows at 2 um bins with a knot at the first bin (half-life
+# 1 um, shallow one-bin steps) outrank every real edge
+MIN_HALF_LIFE_UM = 5.0
 ABLATION_RESOLUTIONS = {
     "visium_hd": [2.0, 8.0, 16.0],
     "stereo-seq": [2.0, 4.0, 8.0, 10.0, 16.0, 25.0],
@@ -116,7 +126,7 @@ def _nearest_value(row, col, values, query_row, query_col):
     return values[idx]
 
 
-def run_buffer(sample, technology, path, adata=None, footprint="pipeline"):
+def run_buffer(sample, technology, path, adata=None, footprint="pipeline", max_fit_distance_um=None):
     """identify_analysis_buffer_from_filtered + BLADE per component, both on the
     same tissue footprint: n_counts > 0 bins with small enclosed holes
     (<= MAX_HOLE_AREA_UM2) filled.
@@ -129,15 +139,21 @@ def run_buffer(sample, technology, path, adata=None, footprint="pipeline"):
     adata: the bins to analyse; by default the pipeline's own tissue-filtered
     bins (bosperrus.load_filtered: Space Ranger's in_tissue / SAW's
     tissue.gef). run_image_mask passes the raw bins inside the image mask
-    instead (footprint="image_mask")."""
+    instead (footprint="image_mask").
+
+    max_fit_distance_um: fit only bins within this distance of the border and test every elbow with
+    bosperrus.interior_window_test (non-significant buffers cleared before BLADE/pct_affected are recorded)."""
     if adata is None:
         _log(f"load_filtered({technology}, {RESOLUTION_UM}um)")
         adata = bosperrus.load_filtered(path, technology, RESOLUTION_UM)
     _log(f"  {adata.n_obs:,} input bins ({footprint}); identify_analysis_buffer_from_filtered ...")
     bosperrus.identify_analysis_buffer_from_filtered(
         adata, min_component_size=MIN_COMPONENT_SPOTS, max_hole_area_um2=MAX_HOLE_AREA_UM2,
-        rising_only=True,
+        rising_only=True, max_fit_distance_um=max_fit_distance_um,
     )
+    if max_fit_distance_um is not None:
+        _log("  interior_window_test ...")
+        bosperrus.interior_window_test(adata, min_half_life_um=MIN_HALF_LIFE_UM)
     fit_info = adata.uns["analysis_buffer_fit"]
     virtual = fit_info["filled_hole_positions"]
     v_row, v_col = np.asarray(virtual["array_row"]), np.asarray(virtual["array_col"])
@@ -181,7 +197,7 @@ def run_buffer(sample, technology, path, adata=None, footprint="pipeline"):
             "n_hole_positions_without_bin": int(v_member.sum()),
             "blade_thresh": n_removed,  # layers removed by BLADE (8-connectivity peel layers)
             "blade_thresh_um": n_removed * RESOLUTION_UM,
-            "max_distance_um": float(np.nanmax(distance[member])),  # distance range the elbow fit saw
+            "max_distance_um": float(np.nanmax(distance[member])),  # deepest bin of the component
             "blade_sweep": sweep.to_dict(orient="list"),
         }
 
@@ -190,6 +206,7 @@ def run_buffer(sample, technology, path, adata=None, footprint="pipeline"):
         "footprint": footprint, "min_component_size": MIN_COMPONENT_SPOTS, "max_hole_area_um2": MAX_HOLE_AREA_UM2,
         "blade_connectivity": BLADE_CONNECTIVITY, "n_filtered_bins": int(adata.n_obs),
         "n_filled_hole_bins": fit_info["n_filled_hole_bins"], "n_hole_positions_without_bin": int(len(v_row)),
+        "fit_max_distance_um": max_fit_distance_um, "window_test": adata.uns.get("analysis_buffer_test"),
         "per_component": per_component,
     }
     filtered = pd.DataFrame({
@@ -311,15 +328,16 @@ def run_image_mask(sample):
     })
     obs.index = obs["array_row"].astype(str) + "_" + obs["array_col"].astype(str)
     # an externally supplied distance column is reused as-is by identify_analysis_buffer_from_filtered
-    full = distance_to_tissue_edge(raw, inside)
-    obs["distance_to_border"] = np.where(full <= TISSUE_FIT_MAX_DISTANCE_UM, full, np.nan)
+    obs["distance_to_border"] = distance_to_tissue_edge(raw, inside)
     adata = anndata.AnnData(obs=obs)
     adata.uns["bosperrus"] = {"technology": row["technology"], "bin_size_um": RESOLUTION_UM, "path": str(row["path"])}
     _log(f"{int(inside.sum()):,} raw bins inside the image mask "
          f"({int((obs['n_counts'] > 0).sum()):,} with counts)")
 
     filtered, buffer_json = run_buffer(sample, row["technology"], row["path"], adata=adata,
-                                     footprint="image_mask (distance to tissue edge, fit within 250 um)")
+                                     footprint=f"image_mask (distance to tissue edge, fit within "
+                                               f"{TISSUE_FIT_MAX_DISTANCE_UM:g} um)",
+                                     max_fit_distance_um=TISSUE_FIT_MAX_DISTANCE_UM)
     # same 8um grid as the npz -> mask coordinates by (array_row, array_col) lookup
     raw_index = pd.Series(np.arange(len(raw["array_row"])),
                           index=pd.MultiIndex.from_arrays([raw["array_row"], raw["array_col"]]))
@@ -343,10 +361,9 @@ def run_in_tissue(sample):
     bosperrus.identify_analysis_buffer_from_filtered(
         adata, min_component_size=MIN_COMPONENT_SPOTS, max_hole_area_um2=MAX_HOLE_AREA_UM2,
     )
-    full = adata.obs["distance_to_border"].to_numpy()
-    adata.obs["distance_to_border"] = np.where(full <= TISSUE_FIT_MAX_DISTANCE_UM, full, np.nan)
     filtered, buffer_json = run_buffer(sample, row["technology"], row["path"], adata=adata,
-                                       footprint="in_tissue (fit within 250 um)")
+                                       footprint=f"in_tissue (fit within {TISSUE_FIT_MAX_DISTANCE_UM:g} um)",
+                                       max_fit_distance_um=TISSUE_FIT_MAX_DISTANCE_UM)
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     filtered.to_parquet(OUT_DIR / f"{sample}_filtered_bins_intissue.parquet")
     (OUT_DIR / f"{sample}_buffer_intissue.json").write_text(json.dumps(_jsonify(buffer_json), indent=1))
@@ -388,7 +405,7 @@ def run_tissue_edge(sample, resolution):
     obs = pd.DataFrame({
         "array_row": raw["array_row"][inside].astype(np.int64), "array_col": raw["array_col"][inside].astype(np.int64),
         "n_counts": raw["n_counts"][inside].astype(np.float64),
-        "distance_to_border": np.where(full <= TISSUE_FIT_MAX_DISTANCE_UM, full, np.nan),
+        "distance_to_border": full,
     })
     obs.index = obs["array_row"].astype(str) + "_" + obs["array_col"].astype(str)
     adata = anndata.AnnData(obs=obs)
@@ -398,7 +415,9 @@ def run_tissue_edge(sample, resolution):
          f"({int((obs['n_counts'] > 0).sum()):,} with counts); min component {min_bins:,} bins")
     bosperrus.identify_analysis_buffer_from_filtered(
         adata, n_counts_key=None, min_component_size=min_bins, max_hole_area_um2=None, rising_only=True,
+        max_fit_distance_um=TISSUE_FIT_MAX_DISTANCE_UM,
     )
+    bosperrus.interior_window_test(adata, min_half_life_um=MIN_HALF_LIFE_UM)
     components = adata.obs["components"].to_numpy()
     buffer = adata.obs["analysis_buffer"].to_numpy()
     per_component = {}
@@ -406,20 +425,20 @@ def run_tissue_edge(sample, resolution):
         member = components == label
         per_component[int(label)] = {
             **info, "pct_affected": float(buffer[member].mean() * 100), "n_bins": int(member.sum()),
-            "max_distance_um": float(np.nanmax(obs["distance_to_border"].to_numpy()[member])),
+            "max_distance_um": float(np.nanmax(full[member])),
         }
         _log(f"  component {label}: {member.sum():,} bins, {info['best_fit_type']}, elbow {info['elbow_um']}")
     suffix = f"_tissueedge_{resolution:g}um"
     pd.DataFrame({
         "array_row": obs["array_row"].astype(np.int32), "array_col": obs["array_col"].astype(np.int32),
         "n_counts": obs["n_counts"].astype(np.float32), "components": components.astype(np.int32),
-        "distance_to_border": obs["distance_to_border"].astype(np.float32), "distance_full_um": full.astype(np.float32),
+        "distance_to_border": full.astype(np.float32),
         "analysis_buffer": buffer,
     }).to_parquet(OUT_DIR / f"{sample}_filtered_bins{suffix}.parquet")
     (OUT_DIR / f"{sample}_buffer{suffix}.json").write_text(json.dumps(_jsonify({
         "sample": sample, "resolution_um": resolution, "min_component_size": min_bins,
         "zero_count_bins_kept": True, "rising_only": True, "fit_max_distance_um": TISSUE_FIT_MAX_DISTANCE_UM,
-        "per_component": per_component,
+        "window_test": adata.uns["analysis_buffer_test"], "per_component": per_component,
     }), indent=1))
     _log(f"wrote {sample}{suffix} outputs to {OUT_DIR}")
 
@@ -428,13 +447,10 @@ def run_blade_image_border(sample):
     """Spots discarded by BLADE as published vs. by bosperrus, both on Space Ranger's in_tissue bins (the
     --in-tissue run's footprint, components and BLADE buffer). bosperrus discards the in_tissue bins outside
     the image mask, and those closer to the image tissue edge than the elbow of their image-mask component
-    (--image-mask run; nearest component) when that elbow has p <= ALPHA against the interior windows
-    (border_criterion). Jaccard index of the two discarded sets.
+    (--image-mask run; nearest component) unless interior_window_test dropped that buffer (untested components keep
+    theirs). Jaccard index of the two discarded sets.
     Writes {sample}_blade_imageborder.json and {sample}_bins_blade_imageborder.parquet."""
-    from border_criterion import criterion_metrics, load_window_null, passes, window_p_value
     from scipy.spatial import cKDTree
-    demo = SAMPLES.index[SAMPLES["dataset_type"] == "visium_demo"]
-    null = load_window_null(OUT_DIR / "interior_windows", demo)
 
     raw = load_raw(sample, RESOLUTION_UM)
     inside = raw["distance_um"] == 0
@@ -442,16 +458,15 @@ def run_blade_image_border(sample):
     to_edge[inside] = distance_to_tissue_edge(raw, inside)
     raw_index = pd.Series(np.arange(len(inside)), index=pd.MultiIndex.from_arrays([raw["array_row"], raw["array_col"]]))
 
-    # image-mask components: p-value and elbow
+    # image-mask components: elbow and window test (--image-mask run)
     img = pd.read_parquet(OUT_DIR / f"{sample}_filtered_bins_imagemask.parquet")
     img = img[~img["virtual"] & (img["components"] >= 0)]
     img_info = json.loads((OUT_DIR / f"{sample}_buffer_imagemask.json").read_text())["per_component"]
     comp_fit = {}
-    for label, g in img.groupby("components"):
+    for label in img["components"].unique():
         info = img_info[str(label)]
-        fitted = g[np.isfinite(g["distance_to_border"])]
-        p = window_p_value(*criterion_metrics(info, fitted["distance_to_border"].max()), null)
-        comp_fit[int(label)] = {"p_value": p, "passes": passes(p), "elbow_um": info["elbow_um"]}
+        comp_fit[int(label)] = {"p_value": info["p_value"], "elbow_um": info["elbow_um"],
+                                "discards": bool(info["border_effect"] and not info["buffer_dropped"])}
 
     # in_tissue bins (BLADE buffer from the --in-tissue run)
     it = pd.read_parquet(OUT_DIR / f"{sample}_filtered_bins_intissue.parquet")
@@ -465,7 +480,7 @@ def run_blade_image_border(sample):
 
     bsp_discard = ~real["inside_image_mask"].to_numpy()
     for label, entry in comp_fit.items():
-        if entry["passes"]:
+        if entry["discards"]:
             member = (real["image_component"] == label).to_numpy()
             bsp_discard[member] |= real["distance_image_edge_um"].to_numpy()[member] < entry["elbow_um"]
     real["bosperrus_discard"] = bsp_discard
@@ -473,7 +488,7 @@ def run_blade_image_border(sample):
     blade_discard = real["in_blade_buffer"].to_numpy()
     union = int((blade_discard | bsp_discard).sum())
     jaccard = int((blade_discard & bsp_discard).sum()) / union if union else np.nan
-    out = {"sample": sample, "alpha_null": "8 um demo interior windows", "jaccard_discarded": jaccard,
+    out = {"sample": sample, "jaccard_discarded": jaccard,
            "n_in_tissue": int(len(real)), "n_discard_blade": int(blade_discard.sum()),
            "n_discard_bosperrus": int(bsp_discard.sum()), "n_discard_both": int((blade_discard & bsp_discard).sum()),
            "image_components": comp_fit}

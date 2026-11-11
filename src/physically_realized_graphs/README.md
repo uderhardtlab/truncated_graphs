@@ -4,6 +4,7 @@ Networks whose edges are measured (synapses, shared cell walls), not constructed
 
 - **MICrONS connectome** (analysis-buffer panel):
     - `microns_buffer.py` (library: `micron_comparison.py`) loads the MICrONS mm³ connectome (`data/reimann_data/`), fits degree vs. distance to the alpha shape and compares the BOSPERRUS buffer with the authors' heuristic → `results/physically_realized_graphs/microns/` (`jobs/physically_realized_graphs_microns.sbatch`).
+    - `microns_log_fit.py`: the same fit on log10(x + 1) degrees, with buffer sizes and Jaccard indices (completeness check; light, reads `results/physically_realized_graphs/microns/`) → `log_fits.json`.
     - Figure: `figure_plotting/physically_realized_graphs/microns.ipynb`.
     - Further MICrONS code and data: `/home/woody/iwbn/iwbn007h/MICrONS_data/`.
 - **Arabidopsis shoot apical meristem** (Jackson et al. 2019, Cell Systems; cell-contact networks, OSF https://osf.io/mxgrh/):

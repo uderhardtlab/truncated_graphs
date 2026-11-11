@@ -2,7 +2,7 @@
 MICrONS mm^3 connectome: BOSPERRUS analysis buffer vs. the Reimann lab's outer-synapse-fraction heuristic.
 
 Fits a piecewise-linear BOSPERRUS curve of (in)degree against each neuron's x-z distance to the alpha shape of
-the neurons' footprint, takes the indegree knot as the buffer, and compares the neurons inside it with the
+the neurons' footprint, takes the total-degree knot as the buffer, and compares the neurons inside it with the
 neurons the Reimann heuristic flags (per neuron and per x-z bin; Jaccard index). Library code:
 micron_comparison.py.
 

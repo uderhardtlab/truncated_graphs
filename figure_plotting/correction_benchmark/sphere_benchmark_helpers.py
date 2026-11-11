@@ -2,12 +2,12 @@
 Plotting code for figure_plotting/correction_benchmark/sphere_benchmark.ipynb (sphere benchmark figure).
 a-c: one example point set per pattern: uniform, von Mises-Fisher kappa = 1, mixture kappa = 1, 3, 5.
 d: the cropped cap on a sphere (kept points dark, removed light).
-e: violin plots comparing raw / detrended (linear, spline) / bosperrus-corrected (additive and log,
-see sphere.py) / SERN-corrected centralities against the uncropped ("original") sphere, as
-Spearman correlations over all crop nodes (sphere.py also writes Pearson and a border-near
-quartile subset; neither is plotted). Rows: Delaunay (stereographic projection, unpruned), k-NN,
-r-NN. A yellow star marks the method with the highest median correlation in each panel.
-f: log BOSPERRUS minus raw, median Spearman correlation, uniform vs. clustered (kappa = 1 and
+e: violin plots comparing raw / detrended (linear, spline) / bosperrus-corrected (additive; sphere.py also
+computes a log variant, not plotted) / SERN-corrected centralities against the uncropped ("original") sphere,
+as Spearman correlations over all crop nodes (sphere.py also writes Pearson and a border-near quartile subset;
+neither is plotted). Rows: Delaunay (stereographic projection, unpruned), k-NN, r-NN. A yellow star marks the
+method with the highest median correlation in each panel.
+f: BOSPERRUS minus raw, median Spearman correlation, uniform vs. clustered (kappa = 1 and
 kappa = 1, 3, 5 runs pooled), one block under each violin column.
 
 Data: results/correction_benchmark/sphere{,_detrend}/ (src/correction_benchmark/sphere.py).
@@ -30,12 +30,11 @@ sys.path.insert(0, str(ROOT / "src" / "correction_benchmark"))  # load_results, 
 from load_results import load_sphere  # noqa: E402
 
 METHOD_PALETTE = {"raw": "grey", "linear": "#D9C27E", "spline": "#A8842A", "bosperrus": "#8ABBD6",
-                  "bosperrus_log": "#1B3F66",
                   "SERN": "#E59EDD"}
 # raw first as the reference, then by overall average rank (best first)
-METHOD_ORDER = ["raw", "bosperrus_log", "bosperrus", "spline", "linear", "SERN"]
-METHOD_LABELS = {"raw": "raw", "linear": "linear detr.", "spline": "spline detr.", "bosperrus": "bosperrus add.",
-                 "bosperrus_log": "bosperrus log", "SERN": "SERN"}
+METHOD_ORDER = ["raw", "bosperrus", "spline", "linear", "SERN"]
+METHOD_LABELS = {"raw": "raw", "linear": "linear detr.", "spline": "spline detr.", "bosperrus": "bosperrus",
+                 "SERN": "SERN"}
 ROW_ORDER = ["delaunay", "knn", "rnn"]
 ROW_LABELS = {"delaunay": "Delaunay", "knn": "$k$-NN", "rnn": "$r$-NN"}
 TEXTWIDTH = (8.5 * 2.54 - 4.0) / 2.54  # letterpaper, 2 cm margins
@@ -72,9 +71,6 @@ def load_data():
         "original vs. SERN corrected on crop": "SERN",
     })
     all_dfs["radius"] = all_dfs["radius"].fillna(0)
-    # r-NN r = 0.05 is excluded from figure 5 (fragmented crop graph; see sphere.py), also for runs
-    # made before it was removed from sphere.py
-    all_dfs = all_dfs[~((all_dfs["graph_type"] == "rnn") & np.isclose(all_dfs["radius"], 0.05))]
     all_dfs["k"] = all_dfs["k"].fillna(0)
 
     if "node_subset" not in all_dfs:
@@ -189,7 +185,7 @@ def plot_crop_schematic(ax, view, title, n=180, seed=3):
 
 def pattern_gain(df, graph, measure, coords):
     s = df[(df.graph_type == graph) & (df.measure == measure) & df.coord_type.isin(coords)]
-    return s["bosperrus_log"].median() - s["raw"].median()
+    return s["bosperrus"].median() - s["raw"].median()
 
 
 def plot_pattern_heatmaps(axes, df):
@@ -298,6 +294,6 @@ def make_figure(all_dfs):
     heat_axes = [fig.add_subplot(bottom[len(ROW_ORDER) + 1, c]) for c in range(len(measures))]
     plot_pattern_heatmaps(heat_axes, df)
     heat_axes[0].text(-0.5, 1.08, "f", transform=heat_axes[0].transAxes, fontsize=8, fontweight="bold", va="bottom")
-    heat_axes[0].text(-0.3, 1.08, "BOSPERRUS log − raw, median Spearman $\\rho$, by point pattern",
+    heat_axes[0].text(-0.3, 1.08, "BOSPERRUS − raw, median Spearman $\\rho$, by point pattern",
                       transform=heat_axes[0].transAxes, fontsize=6.5, va="bottom")
     return fig

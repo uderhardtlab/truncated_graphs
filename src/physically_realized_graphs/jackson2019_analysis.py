@@ -36,10 +36,9 @@ import numpy as np
 import pandas as pd
 import statsmodels.formula.api as smf
 from bosperrus import Flow
+from bosperrus.distances import distance_to_convex_hull
 from bosperrus.fit import PiecewiseLinearFit
-from scipy.spatial import ConvexHull
 from scipy.stats import mannwhitneyu, spearmanr, ttest_ind
-from shapely.geometry import Point, Polygon
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 DATA_DIR = ROOT / "data" / "jackson2019"
@@ -92,9 +91,9 @@ def load_parents(zip_path):
 
 
 def lateral_distance(xy):
-    """Distance of each x-y centroid to the convex hull of all centroids (the field-of-view edge)."""
-    hull = Polygon(xy[ConvexHull(xy).vertices])
-    return np.array([hull.exterior.distance(Point(p)) for p in xy])
+    """Distance of each x-y centroid to the convex hull of all centroids (the edge of the segmented region),
+    i.e. bosperrus' distance_to_convex_hull on the lateral coordinates only."""
+    return distance_to_convex_hull(xy).to_numpy()
 
 
 def cell_table(G, pos, topo=None):

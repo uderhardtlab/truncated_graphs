@@ -15,6 +15,10 @@ Detrending baselines (no saturation model): S - h(d) + median(S), with h a least
 ("linear") or a penalised cubic regression spline (P-spline, 40 equally spaced knots,
 second-difference penalty, lambda chosen by GCV) ("spline") of S vs. d.
 
+k-NN uses k = 5, 10, 15. r-NN uses, as in computational_effects/compute_fits.py, r = the mean distance to the
+k-th nearest neighbour (k = 5, 10, 15) on the whole point set, so it is density-matched to k-NN (mean degree ~k);
+the same r is used for the crop graph.
+
 Graphs are recomputed on the crop, as when a proximity graph is built on an imaged region.
 Delaunay on the crop uses a stereographic projection from the cap's antipode, i.e. the spherical
 Delaunay without the hull facets that triangulate the empty hole.
@@ -33,7 +37,7 @@ import pandas as pd
 from bosperrus import Flow, construct_graph
 from bosperrus.centrality_measures import compute_centrality_measures
 from scipy.interpolate import BSpline
-from scipy.spatial import ConvexHull, Delaunay
+from scipy.spatial import ConvexHull, Delaunay, cKDTree
 from scipy.stats import pearsonr, spearmanr, vonmises_fisher
 from sern import surrogate_ensemble_gt
 from tqdm import trange
@@ -59,6 +63,14 @@ CORRELATION_METHODS = {"pearson": pearsonr, "spearman": spearmanr}
 AFFECTED_QUANTILE = 0.25
 
 OUTPUT_DIR = "../results/correction_benchmark/sphere"
+NEIGHBOUR_COUNTS = [5, 10, 15]  # k-NN k; r-NN radius = mean distance to the k-th neighbour
+
+
+def knn_radius(coords, k):
+    """Mean (Euclidean) distance to the k-th nearest neighbour: an rNN with this radius has a mean degree of
+    about k (as computational_effects/compute_fits.py)."""
+    dist, _ = cKDTree(coords).query(coords, k=k + 1)  # column 0 is the point itself
+    return float(dist[:, k].mean())
 
 
 def sample_uniform_on_unit_sphere(n, rng=None):
@@ -427,7 +439,7 @@ def main(n_runs=N_OF_RUNS, n=5000, n_surrogates=NUMBER_OF_SERNS, output_dir=OUTP
                     all_correlations.append(corr)
 
                 elif edge_type == "knn":
-                    for k in [5, 10, 15]:
+                    for k in NEIGHBOUR_COUNTS:
                         corr = process_coords(**base_kwargs, k=k)
                         corr["k"] = k
                         corr["graph_type"] = edge_type
@@ -436,10 +448,10 @@ def main(n_runs=N_OF_RUNS, n=5000, n_surrogates=NUMBER_OF_SERNS, output_dir=OUTP
                         all_correlations.append(corr)
 
                 elif edge_type == "rnn":
-                    # r = 0.05 dropped: the crop graph fragments, raw correlations are at the ceiling
-                    # (closeness 0.98, betweenness 0.99) and many nodes are isolated -- no boundary test
-                    for r in [0.1, 0.15]:
+                    for k in NEIGHBOUR_COUNTS:
+                        r = knn_radius(coords, k)
                         corr = process_coords(**base_kwargs, r=r)
+                        corr["k"] = k
                         corr["radius"] = r
                         corr["graph_type"] = edge_type
                         corr["coord_type"] = coord_type

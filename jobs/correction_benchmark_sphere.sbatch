@@ -30,20 +30,34 @@
 # 2026-10-19: SERN raised to 400 surrogates; seed 0 alone took 3:43 on 4 cores, so --time is now 8 h.
 # 2026-10-26: linear/spline detrending baselines added (cheap); previous output archived in
 # results/archive/correction_benchmark_pre_detrend/.
-# Submit from anywhere with (on tinyfat, no GPU needed):
-#   sbatch.tinyfat jobs/correction_benchmark_sphere.sbatch
+# 2026-11-09: r-NN switched to the mean k-th-neighbour radius (k = 5, 10, 15); previous output archived in
+# results/archive/correction_benchmark_pre_rnn_k/.
 #SBATCH --job-name=figure5-sphere
-#SBATCH --array=0-99
-#SBATCH --cpus-per-task=4
-#SBATCH --mem=12G
-#SBATCH --time=08:00:00
+#SBATCH --array=0-16
+#SBATCH --cpus-per-task=24
+#SBATCH --mem=96G
+#SBATCH --time=12:00:00
 #SBATCH --output=jobs/logs/correction_benchmark_%A_%a.out
 #SBATCH --error=jobs/logs/correction_benchmark_%A_%a.err
+# 2026-11-09: broadwell256 (7 nodes) is OverSubscribe=EXCLUSIVE, so one seed per task left 20 of 24 cores idle and
+# ran 3 tasks at a time. Each task now runs SEEDS_PER_TASK seeds in parallel on its node: seeds
+# SEED_START + task * SEEDS_PER_TASK + 0..SEEDS_PER_TASK-1, below N_SEEDS. Defaults cover seeds 0-99 with --array=0-16.
+#   sbatch --clusters=tinyfat --partition=broadwell256 jobs/correction_benchmark_sphere.sbatch
+#   SEED_START=3 sbatch --clusters=tinyfat --partition=broadwell256 --array=0-16 jobs/correction_benchmark_sphere.sbatch
 
 set -euo pipefail
 
+SEEDS_PER_TASK=${SEEDS_PER_TASK:-6}
+SEED_START=${SEED_START:-0}
+N_SEEDS=${N_SEEDS:-100}
 # $0 points at the staged copy of this script in the compute node's spool
 # directory, not its original location -- use SLURM's own submit-dir variable.
 cd "$SLURM_SUBMIT_DIR/src"
-echo "Running 1 sphere.py repetition (task $SLURM_ARRAY_TASK_ID) on $(hostname) with $SLURM_CPUS_PER_TASK cpus"
-pixi run python correction_benchmark/sphere.py --n-runs 1 --seed "$SLURM_ARRAY_TASK_ID"
+first=$((SEED_START + SLURM_ARRAY_TASK_ID * SEEDS_PER_TASK))
+seeds=$(seq "$first" $((first + SEEDS_PER_TASK - 1)) | awk -v n="$N_SEEDS" '$1 < n')
+echo "Task $SLURM_ARRAY_TASK_ID on $(hostname), $SLURM_CPUS_PER_TASK cpus: seeds" $seeds
+for s in $seeds; do
+    pixi run python correction_benchmark/sphere.py --n-runs 1 --seed "$s" \
+        > "../jobs/logs/correction_benchmark_${SLURM_ARRAY_JOB_ID}_seed${s}.log" 2>&1 &
+done
+wait

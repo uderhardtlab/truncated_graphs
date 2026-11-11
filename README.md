@@ -23,10 +23,10 @@ do quick, illustrative computations (a single fit or graph, seconds).
 | topic | paper section | compute (`src/<topic>/`) | figure notebooks (`figure_plotting/<topic>/`) |
 |---|---|---|---|
 | `overview` | 1 | — | `pipeline_figure.ipynb` → `fig1_*.svg` (pipeline panels on one MIBI-TOF image) |
-| `spatial_omics` | 2 (analysis buffer), 3 (RNA diffusion QC) | `st_precompute.py` (+ `blade.py`, `border_criterion.py`, `interior_windows.py`) | `ST_demo.ipynb`, `ST_paired.ipynb`; checks: `border_sanity_checks_{demo,paired}.ipynb` |
-| `physically_realized_graphs` | measured networks | `microns_buffer.py`, `jackson_centroids.py`, `jackson2019_analysis.py` | `microns.ipynb`, `meristem.ipynb` |
+| `spatial_omics` | 2 (analysis buffer), 3 (RNA diffusion QC) | `st_precompute.py` (+ `blade.py`) | `ST_demo.ipynb`, `ST_paired.ipynb`; checks: `border_sanity_checks_{demo,paired}.ipynb` |
+| `physically_realized_graphs` | measured networks | `microns_buffer.py`, `microns_log_fit.py`, `jackson_centroids.py`, `jackson2019_analysis.py` | `microns.ipynb`, `meristem.ipynb` |
 | `computational_effects` | 4 | `compute_fits.py`, `example_scores.py`, `imc_centrality.py`, `edge_effects.py` | `mibitof_fits.ipynb`, `edge_effects.ipynb` |
-| `correction_benchmark` | 5 | `sphere.py` (+ `sern.py`), `summarize.py`, `runtime_scaling.py` | `sphere_benchmark.ipynb` |
+| `correction_benchmark` | 5 | `sphere.py` (+ `sern.py`), `summarize.py`, `sphere_paired_stats.py`, `runtime_scaling.py` | `sphere_benchmark.ipynb`, `sphere_paired_stats.ipynb` |
 
 Each `src/<topic>/README.md` lists inputs, outputs and SLURM jobs per script.
 

@@ -11,9 +11,9 @@
   "anisotropy": 0.9962667702377089
  },
  "division_distance": {
-  "dividing_median_um": 28.775106151228627,
+  "dividing_median_um": 28.77510615122863,
   "n_dividing": 94,
-  "non_dividing_median_um": 30.831601326795873,
+  "non_dividing_median_um": 30.83160132679587,
   "n_non_dividing": 1165,
   "mannwhitney_p": 0.03589773728392781
  }

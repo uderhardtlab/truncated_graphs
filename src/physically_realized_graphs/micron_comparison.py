@@ -76,13 +76,13 @@ def fit_bosperrus(alpha_distances, scores):
 
 def compute_reimann_comparison(M, C, flow, alpha_distances, reimann_thresh, nbins):
     """Compare BOSPERRUS's elbow-based affected-neuron classification (using
-    the indegree fit's elbow) against Reimann's per-neuron and per-bin
+    the total-degree fit's elbow) against Reimann's per-neuron and per-bin
     outer-synapse-fraction heuristics, via Jaccard index. Returns a dict with
     the comparison dataframe, Jaccard indices, counts, and the max/mean
     per-bin outer-synapse-fraction grids (for the boundary heatmap panel).
     """
     x_col, z_col = f"x_nm_binned_{nbins}", f"z_nm_binned_{nbins}"
-    elbow = flow.best_fits["indegree"].params["piecewise_linear_b"]
+    elbow = flow.best_fits["degree"].params["piecewise_linear_b"]
 
     df = M.vertices[["x_nm", "z_nm"]].copy()
     df["outer_syn_fraction"] = C.vertices["outer_syn_fraction"].values

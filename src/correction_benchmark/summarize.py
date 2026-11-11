@@ -23,8 +23,6 @@ def main():
     Writes ../results/correction_benchmark/summary.csv."""
     df = load_sphere("../results/correction_benchmark")
     df = df.rename(columns=COLS)
-    # r-NN r = 0.05 excluded, as in figure_plotting/correction_benchmark/sphere_benchmark_helpers.py
-    df = df[~((df["graph_type"] == "rnn") & np.isclose(df["radius"].fillna(0), 0.05))]
     for c in COLS.values():
         df[c] = df[c].abs()
     rows = []

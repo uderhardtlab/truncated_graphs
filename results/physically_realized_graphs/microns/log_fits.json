@@ -1,0 +1,52 @@
+{
+ "reimann_excluded_per_bin": 0.6140864502885602,
+ "reimann_excluded_per_neuron": 0.32847071492268604,
+ "indegree": {
+  "best_fit": "PiecewiseLinearFit",
+  "params": {
+   "piecewise_linear_b": 140578.16706729392,
+   "piecewise_linear_m": 0.0012854936694292655,
+   "piecewise_linear_c": 48.598245340728255
+  },
+  "knot_um": 140.57816706729392,
+  "excluded": 0.6524489761580267,
+  "jaccard_per_bin": 0.8309496010897062,
+  "jaccard_per_neuron": 0.5003860407659049
+ },
+ "degree": {
+  "best_fit": "PiecewiseLinearFit",
+  "params": {
+   "piecewise_linear_b": 145309.8260132466,
+   "piecewise_linear_m": 0.0026346437583813337,
+   "piecewise_linear_c": 87.08379070699218
+  },
+  "knot_um": 145.3098260132466,
+  "excluded": 0.67129372570794,
+  "jaccard_per_bin": 0.8222890129287724,
+  "jaccard_per_neuron": 0.48677592893782057
+ },
+ "log10_indegree": {
+  "best_fit": "PiecewiseLinearFit",
+  "params": {
+   "piecewise_linear_b": 95910.83892866332,
+   "piecewise_linear_m": 8.88777394846486e-06,
+   "piecewise_linear_c": 1.392043545675837
+  },
+  "knot_um": 95.91083892866332,
+  "excluded": 0.45792741406289433,
+  "jaccard_per_bin": 0.7249099818610065,
+  "jaccard_per_neuron": 0.6676657389566831
+ },
+ "log10_degree": {
+  "best_fit": "PiecewiseLinearFit",
+  "params": {
+   "piecewise_linear_b": 94108.48384550975,
+   "piecewise_linear_m": 9.378163963414353e-06,
+   "piecewise_linear_c": 1.5736221281672447
+  },
+  "knot_um": 94.10848384550975,
+  "excluded": 0.4495145794423973,
+  "jaccard_per_bin": 0.7128109250528369,
+  "jaccard_per_neuron": 0.6735920081077168
+ }
+}
